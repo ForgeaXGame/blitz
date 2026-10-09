@@ -98,7 +98,7 @@ dioxus-cli-config = { version = "0.7.3" }
 dioxus-core-macro = { version = "0.7.3" }
 
 # Taffy + Parley + Fontations
-taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "2d936b7701f64b0fe95e50f1bfdcfc65a9f88f6f", default-features = false, features = [
+taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "7d33901cc383489d9945ae796a1ceed0a935ef66", default-features = false, features = [
     "std",
     "flexbox",
     "flexbox_balance",
@@ -108,9 +108,9 @@ taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "2d936b7701f64b0fe9
     "calc",
     "detailed_layout_info",
 ] }
-# The font value types shared by the text backends, from Parley's revision
-parlance = { git = "https://github.com/linebender/parley", rev = "400453963ed14bad8034152626fd5c512dd77c0c", default-features = false, features = ["std"] }
-parley = { git = "https://github.com/linebender/parley", rev = "400453963ed14bad8034152626fd5c512dd77c0c", default-features = false, features = ["std"] }
+# The font value types shared by the text backends
+parlance = { version = "0.1", default-features = false, features = ["std"] }
+parley = { version = "0.12", default-features = false, features = ["std"] }
 # Its `dictionaries` feature, ICU's line and word dictionaries, is blitz-dom's
 # `complex-scripts`.
 winkin = { git = "https://github.com/dfrg/winkin", rev = "cc23131616875421d162295c84fd2dc449a2abcb", default-features = false, features = ["std"] }
