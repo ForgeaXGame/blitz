@@ -349,6 +349,9 @@ impl DocumentMutator<'_> {
 
         if *attr == local_name!("value") {
             if let Some(input_data) = element.text_input_data_mut() {
+                if input_data.dirty_value {
+                    return;
+                }
                 // Update text input value
                 input_data.set_text(
                     &mut self.doc.font_ctx.lock().unwrap(),
@@ -468,6 +471,9 @@ impl DocumentMutator<'_> {
         // Update text input value
         if name.local == local_name!("value") {
             if let Some(input_data) = element.text_input_data_mut() {
+                if input_data.dirty_value {
+                    return;
+                }
                 input_data.set_text(
                     &mut self.doc.font_ctx.lock().unwrap(),
                     &mut self.doc.layout_ctx,
@@ -902,7 +908,10 @@ impl<'doc> DocumentMutator<'doc> {
     }
 
     pub fn set_inner_html(&mut self, node_id: NodeId, html: &str) {
-        self.remove_and_drop_all_children(node_id);
+        // Fragment replacement detaches the old children. A script may still
+        // hold any of those nodes and can reinsert them after this operation.
+        // Embedders may explicitly drop unreachable detached subtrees.
+        self.replace_children(node_id, &[]);
         self.doc
             .html_parser_provider
             .clone()
@@ -1364,6 +1373,46 @@ mod test {
     use blitz_traits::shell::{ColorScheme, ShellProvider, Viewport};
 
     use crate::{Attribute, BaseDocument, DocumentConfig, ElementData, NodeData, qual_name};
+
+    #[test]
+    fn inner_html_keeps_detached_node_references_live() {
+        let mut document = BaseDocument::new(DocumentConfig::default());
+        let mut mutation = document.mutate();
+        let parent = mutation.create_element(qual_name!("div", html), vec![]);
+        let child = mutation.create_text_node("retained");
+        mutation.append_children(parent, &[child]);
+        mutation.set_inner_html(parent, "");
+        assert_eq!(mutation.parent_id(child), None);
+        assert_eq!(
+            mutation.doc.get_node(child).unwrap().text_content(),
+            "retained"
+        );
+        mutation.append_children(parent, &[child]);
+        assert_eq!(
+            mutation.doc.get_node(parent).unwrap().text_content(),
+            "retained"
+        );
+    }
+
+    #[test]
+    fn input_value_precedes_layout_and_survives_default_attribute_changes() {
+        let mut document = BaseDocument::new(DocumentConfig::default());
+        let id = document
+            .mutate()
+            .create_element(qual_name!("input", html), vec![]);
+        assert_eq!(document.input_value(id).as_deref(), Some(""));
+        assert!(document.set_input_value(id, "3.25"));
+        document
+            .mutate()
+            .set_attribute(id, qual_name!("value"), "9");
+        assert_eq!(document.input_value(id).as_deref(), Some("3.25"));
+        let cloned = document.mutate().deep_clone_node(id);
+        assert_eq!(document.input_value(cloned).as_deref(), Some("3.25"));
+        document
+            .mutate()
+            .clear_attribute(cloned, qual_name!("value"));
+        assert_eq!(document.input_value(cloned).as_deref(), Some("3.25"));
+    }
 
     #[test]
     fn media_type_defaults_to_screen() {

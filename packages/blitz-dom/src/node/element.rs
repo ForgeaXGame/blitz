@@ -568,6 +568,24 @@ impl ElementData {
         }
     }
 
+    /// Text-entry controls share the same editor before and after layout.
+    pub fn text_input_is_multiline(&self) -> Option<bool> {
+        match self.name.local.as_ref() {
+            "textarea" => Some(true),
+            "input"
+                if matches!(
+                    self.attr(local_name!("type")),
+                    None | Some(
+                        "text" | "password" | "email" | "number" | "search" | "tel" | "url"
+                    )
+                ) =>
+            {
+                Some(false)
+            }
+            _ => None,
+        }
+    }
+
     pub fn text_input_data_mut(&mut self) -> Option<&mut TextInputData> {
         match &mut self.special_data {
             SpecialElementData::TextInput(data) => Some(data),

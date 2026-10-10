@@ -62,6 +62,9 @@ pub struct TextInputData {
     pub editor: Box<parley::PlainEditor<TextBrush>>,
     /// Whether the input is a singleline or multiline input
     pub is_multiline: bool,
+    /// The DOM value was set by script or user editing, independently of the
+    /// value content attribute. Attribute mutations must not replace it.
+    pub dirty_value: bool,
     /// The scroll offset of the text content within the input, in CSS (unscaled) pixels.
     ///
     /// For single-line inputs this is a horizontal offset; for multi-line inputs it is a
@@ -73,7 +76,10 @@ pub struct TextInputData {
 // FIXME: Implement Clone for PlainEditor
 impl Clone for TextInputData {
     fn clone(&self) -> Self {
-        TextInputData::new(self.is_multiline)
+        let mut cloned = TextInputData::new(self.is_multiline);
+        cloned.editor.set_text(&self.editor.text().to_string());
+        cloned.dirty_value = self.dirty_value;
+        cloned
     }
 }
 
@@ -83,6 +89,7 @@ impl TextInputData {
         Self {
             editor,
             is_multiline,
+            dirty_value: false,
             scroll_offset: 0.0,
         }
     }

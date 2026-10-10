@@ -1,5 +1,4 @@
 use blitz_traits::node_id::NodeId;
-use core::str;
 use std::sync::Arc;
 
 use markup5ever::{QualName, local_name, ns};
@@ -25,7 +24,7 @@ use crate::{
     },
     node::{
         ListItemLayout, ListItemLayoutPosition, Marker, NodeFlags, NodeKind, SpecialElementData,
-        TextBrush, TextInputData, TextLayout,
+        TextBrush, TextLayout,
     },
     qual_name, stylo_to_parley,
     traversal::{iter_children, iter_children_and_pseudos},
@@ -438,25 +437,15 @@ fn collect_layout_children_with_wrap(
 
     if let Some(el) = doc.nodes[container_node_id].data.downcast_element() {
         // Handle text inputs
-        let tag_name = el.name.local.as_ref();
-        if matches!(tag_name, "input" | "textarea") {
-            let type_attr: Option<&str> = doc.nodes[container_node_id]
-                .data
-                .downcast_element()
-                .and_then(|el| el.attr(local_name!("type")));
-            if tag_name == "textarea" {
-                create_text_editor(doc, container_node_id, true);
-                return;
-            } else if matches!(
-                type_attr,
-                None | Some("text" | "password" | "email" | "number" | "search" | "tel" | "url")
-            ) {
-                create_text_editor(doc, container_node_id, false);
-                return;
-            } else if matches!(type_attr, Some("checkbox" | "radio")) {
-                create_checkbox_input(doc, container_node_id);
-                return;
-            }
+        let tag_name: &str = el.name.local.as_ref();
+        if el.text_input_is_multiline().is_some() {
+            create_text_editor(doc, container_node_id);
+            return;
+        } else if tag_name == "input"
+            && matches!(el.attr(local_name!("type")), Some("checkbox" | "radio"))
+        {
+            create_checkbox_input(doc, container_node_id);
+            return;
         }
 
         #[cfg(feature = "svg")]
@@ -854,7 +843,8 @@ fn collect_complex_layout_children(
     out.maybe_push_anon_block(doc);
 }
 
-fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multiline: bool) {
+fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId) {
+    assert!(doc.ensure_text_input(input_element_id));
     let node = &mut doc.nodes[input_element_id];
     let parley_style = node
         .primary_styles()
@@ -870,18 +860,7 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multi
         .map(|s| stylo_to_parley::base_direction(s.clone_direction(), s.clone_unicode_bidi()))
         .unwrap_or(parley::BaseDirection::Auto);
 
-    let initial_text = if is_multiline {
-        node.text_content()
-    } else {
-        node.attr(local_name!("value")).unwrap_or("").to_string()
-    };
     let element = &mut node.data.downcast_element_mut().unwrap();
-    if !matches!(element.special_data, SpecialElementData::TextInput(_)) {
-        let mut text_input_data = TextInputData::new(is_multiline);
-        let editor = &mut text_input_data.editor;
-        editor.set_text(&initial_text);
-        element.special_data = SpecialElementData::TextInput(text_input_data);
-    }
 
     let SpecialElementData::TextInput(text_input_data) = &mut element.special_data else {
         unreachable!();

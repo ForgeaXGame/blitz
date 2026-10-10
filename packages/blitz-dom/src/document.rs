@@ -2404,6 +2404,54 @@ impl BaseDocument {
         self.find_element_by_tag_name(&local_name!("title"))
     }
 
+    /// Read a control value without requiring the element to have a layout box.
+    pub fn input_value(&self, node_id: NodeId) -> Option<String> {
+        let node = self.get_node(node_id)?;
+        let element = node.element_data()?;
+        let multiline = element.text_input_is_multiline()?;
+        Some(match element.text_input_data() {
+            Some(input) => input.editor.text().to_string(),
+            None if multiline => node.text_content(),
+            None => element.attr(local_name!("value")).unwrap_or("").to_string(),
+        })
+    }
+
+    /// Initialize value state independently of style/layout and DOM attachment.
+    pub(crate) fn ensure_text_input(&mut self, node_id: NodeId) -> bool {
+        let Some(initial) = self.input_value(node_id) else {
+            return false;
+        };
+        let element = self.nodes[node_id].element_data_mut().unwrap();
+        if element.text_input_data().is_none() {
+            let mut input =
+                crate::node::TextInputData::new(element.text_input_is_multiline().unwrap());
+            input.editor.set_text(&initial);
+            element.special_data = crate::node::SpecialElementData::TextInput(input);
+        }
+        true
+    }
+
+    /// Set the current value, retaining a distinct default value attribute.
+    pub fn set_input_value(&mut self, node_id: NodeId, value: &str) -> bool {
+        if !self.ensure_text_input(node_id) {
+            return false;
+        }
+        self.with_text_input(node_id, |mut driver| {
+            driver.editor.set_text(value);
+            driver.refresh_layout();
+        });
+        let node = &mut self.nodes[node_id];
+        node.element_data_mut()
+            .unwrap()
+            .text_input_data_mut()
+            .unwrap()
+            .dirty_value = true;
+        node.insert_damage(crate::layout::damage::ALL_DAMAGE);
+        node.mark_ancestors_dirty();
+        self.shell_provider.request_redraw();
+        true
+    }
+
     pub fn with_text_input(
         &mut self,
         node_id: NodeId,
