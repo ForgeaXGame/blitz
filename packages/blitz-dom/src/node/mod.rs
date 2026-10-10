@@ -5,7 +5,9 @@ mod attributes;
 mod custom_widget;
 mod element;
 mod node;
+mod range;
 pub(crate) mod scrollbar;
+mod select;
 mod serialize;
 mod stylo_data;
 #[cfg(feature = "svg")]
@@ -23,7 +25,9 @@ pub use element::{
     SpecialElementType, Status,
 };
 pub use node::*;
+pub use range::{RANGE_THUMB_SIZE, RangeConstraints, RangeInput};
 pub use scrollbar::{ScrollbarColor, ScrollbarRef, ScrollbarWidth};
+pub use select::SelectInput;
 pub use stylo_data::ComputedStyleRef;
 #[cfg(feature = "svg")]
 pub use svg::{SvgImageData, SvgIntrinsicDimensions};

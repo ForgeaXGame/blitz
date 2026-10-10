@@ -14,6 +14,10 @@ fixes the resolved headless dependency graph. Upstream licenses remain unchanged
 | Every document registers its builtin Bullet font, including supplied font contexts; disclosure and list markers do not depend on host font coverage | `document::font_face_override_tests::supplied_font_context_retains_builtin_marker_font`; Engine generated-WASM implicit/explicit Bullet pixel comparison covers details, lists and controls |
 | Checkbox/radio checkedness has one native ElementState, a dirty-default flag and DOM/form-scoped radio exclusion; script state is available before layout | Engine `checked_state_defaults_and_radio_groups_have_native_ownership`; real-WASM/Chromium property, cancellation, pointer, label and keyboard comparisons |
 | Removed font/stylesheet nodes cannot adopt late resource results | Engine `removed_font_stylesheet_rejects_its_late_response` |
+| Range controls retain native current/default state and min/max/step sanitization; the existing CPU painter draws track and thumb from that same value | Engine `range_value_mutations_and_pointer_defaults_move_native_thumb_pixels`; ordinary settings UiAsset pointer/keyboard and value operations against Chromium |
+| CSSOM client rectangles include the resolved node/ancestor transforms used by painting and hit testing; offset geometry stays untransformed | Engine `transformed_range_client_rects_hit_the_same_painted_control` |
+| Single select values and dirty option defaults stay on native nodes; layout and the viewport popup share one option projection and pointer rectangle | Engine `select_defaults_values_and_native_popup_commit_share_option_state`; Chromium differential settings consumer |
+| Checkbox/radio accent is independent of inherited text color; checkbox tick geometry includes its painted frame origin | Engine `white_label_checkbox_keeps_checked_fill_and_tick_visible_at_its_position` |
 
 `BaseDocument::input_value` and `set_input_value` share the same Parley editor used
 for layout and editing. Layout no longer creates a second value authority. Native

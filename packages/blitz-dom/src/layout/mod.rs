@@ -326,11 +326,34 @@ impl LayoutPassState<'_> {
                     return output;
                 }
 
+                if let Some(select) = element_data.select_data() {
+                    let size = taffy::Size {
+                        width: select.intrinsic_width as f32,
+                        height: select.row_height as f32,
+                    };
+                    return compute_leaf_layout(
+                        inputs,
+                        &node.layout_style(),
+                        resolve_calc_value,
+                        |_known_size, _available_space| size,
+                    );
+                }
                 if *element_data.name.local == *"input" {
                     match element_data.attr(local_name!("type")) {
                         // if the input type is hidden, hide it
                         Some("hidden") => {
                             return taffy::LayoutOutput::HIDDEN;
+                        }
+                        Some("range") => {
+                            return compute_leaf_layout(
+                                inputs,
+                                &node.layout_style(),
+                                resolve_calc_value,
+                                |_known_size, _available_space| taffy::Size {
+                                    width: 129.0,
+                                    height: 16.0,
+                                },
+                            );
                         }
                         Some("checkbox") => {
                             return compute_leaf_layout(

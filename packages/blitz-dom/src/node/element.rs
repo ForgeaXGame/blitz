@@ -373,7 +373,14 @@ pub enum SpecialElementData {
     /// Parley text editor (text inputs)
     TextInput(TextInputData),
     /// Checkedness lives in ElementState; this records divergence from the default attribute.
-    CheckboxInput { dirty: bool },
+    CheckboxInput {
+        dirty: bool,
+    },
+    RangeInput(super::RangeInput),
+    Select(super::SelectInput),
+    Option {
+        dirty: bool,
+    },
     /// Selected files
     #[cfg(feature = "file-input")]
     FileInput(FileData),
@@ -394,6 +401,12 @@ impl Clone for SpecialElementData {
             Self::TableRoot(data) => Self::TableRoot(data.clone()),
             Self::TextInput(data) => Self::TextInput(data.clone()),
             Self::CheckboxInput { dirty } => Self::CheckboxInput { dirty: *dirty },
+            Self::RangeInput(data) => Self::RangeInput(data.clone()),
+            Self::Select(data) => Self::Select(super::SelectInput {
+                allow_empty: data.allow_empty,
+                ..Default::default()
+            }),
+            Self::Option { dirty } => Self::Option { dirty: *dirty },
             #[cfg(feature = "file-input")]
             Self::FileInput(data) => Self::FileInput(data.clone()),
             Self::None => Self::None,
@@ -448,6 +461,11 @@ impl ElementData {
         data.flush_link_state();
 
         data.ensure_checkbox_input();
+        data.sync_range_attribute("value");
+        if data.name.local == local_name!("select") {
+            data.special_data = SpecialElementData::Select(Default::default());
+        }
+        data.sync_option_attribute();
 
         // The element state needs to be modified if the element can be disabled.
         if data.can_be_disabled() {
@@ -951,6 +969,9 @@ impl std::fmt::Debug for SpecialElementData {
             SpecialElementData::CheckboxInput { .. } => {
                 f.write_str("NodeSpecificData::CheckboxInput")
             }
+            SpecialElementData::RangeInput(_) => f.write_str("NodeSpecificData::RangeInput"),
+            SpecialElementData::Select(_) => f.write_str("NodeSpecificData::Select"),
+            SpecialElementData::Option { .. } => f.write_str("NodeSpecificData::Option"),
             #[cfg(feature = "file-input")]
             SpecialElementData::FileInput(_) => f.write_str("NodeSpecificData::FileInput"),
             SpecialElementData::None => f.write_str("NodeSpecificData::None"),

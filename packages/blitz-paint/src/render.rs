@@ -242,6 +242,8 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             viewport_clip_rect,
         );
 
+        self.draw_select_popups(scene);
+
         // Render debug overlay
         if self.dom.devtools().highlight_hover {
             if let Some(node_id) = self.dom.as_ref().get_hover_node_id() {

@@ -54,6 +54,19 @@ input {
     display: inline-block;
 }
 
+select {
+    display: inline-block;
+    color: black;
+    background: white;
+    border: 1px solid #999;
+    padding: 0 2px;
+    vertical-align: baseline;
+}
+
+select option, select optgroup {
+    display: none;
+}
+
 /* https://html.spec.whatwg.org/#hidden-elements */
 input[type="hidden" i] {
     display: none !important;
@@ -63,6 +76,8 @@ input[type="checkbox"] {
     width: 14px;
     height: 14px;
     margin: 3px 3px 3px 4px;
+    padding: 0;
+    border: 0;
 }
 
 input[type="radio"] {
@@ -71,6 +86,7 @@ input[type="radio"] {
     border-radius: 14px;
     border: none;
     margin: 3px 3px 3px 4px;
+    padding: 0;
 }
 
 input,
@@ -93,6 +109,15 @@ textarea {
 input:focus,
 textarea:focus {
     outline: 2px solid #4D90FE;
+}
+
+input[type="range" i] {
+    width: 129px;
+    height: 16px;
+    margin: 2px;
+    padding: 0;
+    border: 0;
+    background: transparent;
 }
 
 button,

@@ -443,6 +443,10 @@ fn collect_layout_children_with_wrap(
     if let Some(el) = doc.nodes[container_node_id].data.downcast_element() {
         // Handle text inputs
         let tag_name: &str = el.name.local.as_ref();
+        if tag_name == "select" {
+            doc.prepare_select(container_node_id);
+            return;
+        }
         if el.text_input_is_multiline().is_some() {
             create_text_editor(doc, container_node_id);
             return;

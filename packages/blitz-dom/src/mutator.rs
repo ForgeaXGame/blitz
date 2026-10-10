@@ -317,6 +317,15 @@ impl DocumentMutator<'_> {
         }
 
         element.attrs.set(name.clone(), value);
+        if name.local == local_name!("selected") {
+            element.sync_option_attribute();
+        }
+        if matches!(
+            name.local.as_ref(),
+            "type" | "value" | "min" | "max" | "step"
+        ) {
+            element.sync_range_attribute(name.local.as_ref());
+        }
 
         // Focusability is cached on the element and comes from these
         // attributes, so it has to follow a change to one of them: a widget
@@ -335,6 +344,11 @@ impl DocumentMutator<'_> {
 
         let tag = &element.name.local;
         let attr = &name.local;
+
+        if *tag == local_name!("option") && *attr == local_name!("selected") {
+            self.doc.reconcile_selected_option(node_id);
+            return;
+        }
 
         if *attr == local_name!("id") {
             element.id = Some(Atom::from(value))
@@ -440,11 +454,20 @@ impl DocumentMutator<'_> {
         };
 
         let removed_attr = element.attrs.remove(&name);
+        if name.local == local_name!("selected") {
+            element.sync_option_attribute();
+        }
         let had_attr = removed_attr.is_some();
         if !had_attr {
             return;
         }
         self.mutations_occurred |= node_is_in_document;
+        if matches!(
+            name.local.as_ref(),
+            "type" | "value" | "min" | "max" | "step"
+        ) {
+            element.sync_range_attribute(name.local.as_ref());
+        }
 
         // If element is a CustomWidget, then call attribute_changed on it
         #[cfg(feature = "custom-widget")]
@@ -488,6 +511,11 @@ impl DocumentMutator<'_> {
 
         let tag = &element.name.local;
         let attr = &name.local;
+
+        if *tag == local_name!("option") && *attr == local_name!("selected") {
+            self.doc.reconcile_selected_option(node_id);
+            return;
+        }
 
         if *attr == local_name!("disabled") && element.can_be_disabled() {
             node.enable();
@@ -573,6 +601,7 @@ impl DocumentMutator<'_> {
             // Mark ancestors dirty so the style traversal visits this subtree.
             parent.mark_ancestors_dirty();
             parent.children.retain(|id| *id != node_id);
+            self.doc.reconcile_select(parent_id);
             self.maybe_record_node(parent_id);
         }
     }
@@ -613,6 +642,7 @@ impl DocumentMutator<'_> {
             }
 
             parent.children.retain(|id| *id != node_id);
+            self.doc.reconcile_select(parent_id);
             self.maybe_record_node(parent_id);
         }
 
@@ -755,7 +785,24 @@ impl DocumentMutator<'_> {
             for id in checked.into_iter().rev() {
                 self.doc.reconcile_radio_group(id);
             }
+            let options: Vec<_> =
+                crate::traversal::TreeTraverser::new_with_root(self.doc, child_id)
+                    .filter(|id| {
+                        self.doc
+                            .get_node(*id)
+                            .and_then(|node| node.element_data())
+                            .is_some_and(|e| {
+                                e.name.local == local_name!("option")
+                                    && e.element_state.contains(style_dom::ElementState::CHECKED)
+                            })
+                    })
+                    .collect();
+            for option in options {
+                self.doc.reconcile_selected_option(option);
+            }
         }
+
+        self.doc.reconcile_select(parent_id);
 
         self.maybe_record_node(parent_id);
     }
@@ -1088,6 +1135,8 @@ impl<'doc> DocumentMutator<'doc> {
                 SpecialElementData::TableRoot(_) => {}
                 SpecialElementData::TextInput(_) => {}
                 SpecialElementData::CheckboxInput { .. } => {}
+                SpecialElementData::RangeInput(_) => {}
+                SpecialElementData::Select(_) | SpecialElementData::Option { .. } => {}
                 #[cfg(feature = "file-input")]
                 SpecialElementData::FileInput(_) => {}
                 SpecialElementData::None => {}

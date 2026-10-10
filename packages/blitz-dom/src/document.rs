@@ -2439,19 +2439,61 @@ impl BaseDocument {
         // Non-atomic inline elements have no layout box of their own: return
         // the union of their per-line-box fragment rects.
         if let Some(rects) = self.inline_fragment_rects(node_id) {
-            return rects.reduce(BoundingRect::union);
+            return rects
+                .map(|rect| self.transform_client_rect(node_id, rect))
+                .reduce(BoundingRect::union);
         }
 
         self.get_node(node_id)?;
         let (pos, layout) = self.physical_unrounded_geometry(node_id);
         let size = layout.size;
 
-        Some(BoundingRect {
-            x: snap_to_layout_unit(pos.x as f64 - self.viewport_scroll().x),
-            y: snap_to_layout_unit(pos.y as f64 - self.viewport_scroll().y),
-            width: snap_to_layout_unit(size.width as f64),
-            height: snap_to_layout_unit(size.height as f64),
-        })
+        Some(self.transform_client_rect(
+            node_id,
+            BoundingRect {
+                x: snap_to_layout_unit(pos.x as f64 - self.viewport_scroll().x),
+                y: snap_to_layout_unit(pos.y as f64 - self.viewport_scroll().y),
+                width: snap_to_layout_unit(size.width as f64),
+                height: snap_to_layout_unit(size.height as f64),
+            },
+        ))
+    }
+
+    /// Apply the same resolved transforms as painting/hit testing. Offset geometry
+    /// remains untransformed; only CSSOM client rectangles use this projection.
+    fn transform_client_rect(&self, node_id: NodeId, rect: BoundingRect) -> BoundingRect {
+        let mut transform = kurbo::Affine::IDENTITY;
+        let mut current = Some(node_id);
+        let scale = self.viewport().scale_f64();
+        while let Some(id) = current {
+            let node = &self.nodes[id];
+            if let Some(local) = node.transform().as_deref() {
+                let [a, b, c, d, x, y] = local.as_coeffs();
+                let local = kurbo::Affine::new([a, b, c, d, x / scale, y / scale]);
+                let (position, _) = self.physical_unrounded_geometry(id);
+                let origin = kurbo::Affine::translate((
+                    position.x as f64 - self.viewport_scroll().x,
+                    position.y as f64 - self.viewport_scroll().y,
+                ));
+                transform = origin * local * origin.inverse() * transform;
+            }
+            current = node
+                .containing_block()
+                .or(node.parent)
+                .or(node.shadow_host_id());
+        }
+        let bounds = transform.transform_rect_bbox(kurbo::Rect::new(
+            rect.x,
+            rect.y,
+            rect.x + rect.width,
+            rect.y + rect.height,
+        ));
+        BoundingRect {
+            x: bounds.x0,
+            y: bounds.y0,
+            width: bounds.width(),
+            height: bounds.height(),
+        }
     }
 
     /// CSSOM View's `offsetLeft`/`offsetTop`/`offsetWidth`/`offsetHeight` as a single rect:
@@ -2521,7 +2563,9 @@ impl BaseDocument {
     /// spans within an inline root's text layout) return one rect per line box.
     pub fn node_client_rects(&self, node_id: NodeId) -> Vec<BoundingRect> {
         match self.inline_fragment_rects(node_id) {
-            Some(rects) => rects.collect(),
+            Some(rects) => rects
+                .map(|rect| self.transform_client_rect(node_id, rect))
+                .collect(),
             None => self.get_client_bounding_rect(node_id).into_iter().collect(),
         }
     }
@@ -2592,6 +2636,15 @@ impl BaseDocument {
 
     /// Read a control value without requiring the element to have a layout box.
     pub fn input_value(&self, node_id: NodeId) -> Option<String> {
+        if let Some(value) = self
+            .select_value(node_id)
+            .or_else(|| self.option_value(node_id))
+        {
+            return Some(value);
+        }
+        if let Some(value) = self.get_node(node_id)?.element_data()?.range_value() {
+            return Some(value.to_string());
+        }
         if self.input_checked(node_id).is_some() {
             return Some(
                 self.nodes[node_id]
@@ -2654,6 +2707,27 @@ impl BaseDocument {
 
     /// Set the current value, retaining a distinct default value attribute.
     pub fn set_input_value(&mut self, node_id: NodeId, value: &str) -> bool {
+        if self.set_select_value(node_id, value) {
+            return true;
+        }
+        if self.option_value(node_id).is_some() {
+            self.mutate()
+                .set_attribute(node_id, crate::qual_name!("value"), value);
+            return true;
+        }
+        if self
+            .get_node(node_id)
+            .and_then(|node| node.element_data())
+            .and_then(|element| element.range_constraints())
+            .is_some()
+        {
+            let node = &mut self.nodes[node_id];
+            node.element_data_mut().unwrap().set_range_value(value);
+            node.insert_damage(ALL_DAMAGE);
+            node.mark_ancestors_dirty();
+            self.shell_provider.request_redraw();
+            return true;
+        }
         if self.input_checked(node_id).is_some() {
             self.mutate()
                 .set_attribute(node_id, crate::qual_name!("value"), value);
@@ -3053,7 +3127,7 @@ impl AsMut<BaseDocument> for BaseDocument {
 }
 
 /// HTML's valid floating-point-number grammar (not Rust's inf/NaN parser).
-fn valid_number_value(value: &str) -> bool {
+pub(crate) fn valid_number_value(value: &str) -> bool {
     let bytes = value.as_bytes();
     let mut i = usize::from(bytes.first() == Some(&b'-'));
     let integer_start = i;
