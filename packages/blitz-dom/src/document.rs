@@ -1015,6 +1015,12 @@ impl BaseDocument {
     }
 
     pub fn deep_clone_node(&mut self, node_id: NodeId) -> NodeId {
+        self.clone_node(node_id, true)
+    }
+
+    /// Clone DOM content, including an independent template content fragment.
+    /// Shadow roots and live interaction state never transfer to the clone.
+    pub fn clone_node(&mut self, node_id: NodeId, deep: bool) -> NodeId {
         // Load existing node
         let node = &self.nodes[node_id];
         let mut data = node.data.clone();
@@ -1031,6 +1037,7 @@ impl BaseDocument {
         }
 
         let children = node.children.clone();
+        let template = node.element_data().and_then(|data| data.template_contents);
 
         // Create new node
         let new_node_id = self.create_node(data);
@@ -1038,12 +1045,20 @@ impl BaseDocument {
         // Recursively clone children
         let new_children: ThinVec<NodeId> = children
             .into_iter()
+            .filter(|_| deep)
             .map(|child_id| self.deep_clone_node(child_id))
             .collect();
         for &child_id in &new_children {
             self.nodes[child_id].parent = Some(new_node_id);
         }
         self.nodes[new_node_id].children = new_children;
+        if let Some(template) = template {
+            let content = self.clone_node(template, deep);
+            self.nodes[new_node_id]
+                .element_data_mut()
+                .unwrap()
+                .template_contents = Some(content);
+        }
 
         new_node_id
     }
@@ -1540,6 +1555,10 @@ impl BaseDocument {
     pub fn style_depends_on_state(&self, state: ElementState) -> bool {
         self.stylist.iter_origins().any(|(data, _)| {
             data.has_state_dependency(state) || data.has_nth_of_state_dependency(state)
+        }) || self.nodes.iter().any(|(_, node)| {
+            node.shadow_cascade().is_some_and(|data| {
+                data.has_state_dependency(state) || data.has_nth_of_state_dependency(state)
+            })
         })
     }
 
@@ -1556,6 +1575,13 @@ impl BaseDocument {
             self.snapshot_node_state_only(node_id);
         }
         cb(&mut self.nodes[node_id]);
+        // Shadow author scopes are not members of the document's origin set.
+        // Their host/descendant state selectors must take part in invalidation.
+        if self.nodes[node_id].shadow_root_id().is_some()
+            || self.nodes[node_id].containing_shadow_id().is_some()
+        {
+            self.nodes[node_id].set_restyle_hint(RestyleHint::restyle_subtree());
+        }
     }
 
     // Takes (x, y) co-ordinates (relative to the )
@@ -1683,6 +1709,9 @@ impl BaseDocument {
         let Some(focus_node_id) = self.nearest_non_anonymous_ancestor(focus_node_id) else {
             return false;
         };
+        if !self.can_focus(focus_node_id) {
+            return false;
+        }
         if Some(focus_node_id) == self.focus_node_id {
             return false;
         }
@@ -1715,6 +1744,14 @@ impl BaseDocument {
         let Some(hover_node_id) = self.get_hover_node_id() else {
             return false;
         };
+        self.set_active_element(Some(hover_node_id))
+    }
+
+    /// Set native pointer activation by the same DOM identity used for events.
+    pub fn set_active_element(&mut self, node_id: Option<NodeId>) -> bool {
+        let Some(hover_node_id) = node_id else {
+            return self.unactive_node();
+        };
 
         if let Some(active_node_id) = self.active_node_id {
             if active_node_id == hover_node_id {
@@ -1738,6 +1775,70 @@ impl BaseDocument {
 
         self.active_node_id = active_node_id;
 
+        true
+    }
+
+    /// Focus eligibility is shared by programmatic focus and focus retirement.
+    pub fn can_focus(&self, node_id: NodeId) -> bool {
+        let Some(node) = self.get_node(node_id) else {
+            return false;
+        };
+        let Some(element) = node.element_data() else {
+            return false;
+        };
+        if !node.has_boxes() || element.element_state.contains(ElementState::DISABLED) {
+            return false;
+        }
+        if !node.is_focussable()
+            && element
+                .attr(local_name!("tabindex"))
+                .and_then(|v| v.parse::<i32>().ok())
+                .is_none()
+        {
+            return false;
+        }
+        if node.primary_styles().is_none_or(|styles| {
+            styles.clone_visibility() != style::computed_values::visibility::T::Visible
+        }) {
+            return false;
+        }
+        let mut ancestor = node.flat_parent();
+        while let Some(id) = ancestor {
+            let parent = &self.nodes[id];
+            if parent.display_style().is_some_and(|display| {
+                display.inside() == style::values::specified::box_::DisplayInside::None
+            }) {
+                return false;
+            }
+            ancestor = parent.flat_parent();
+        }
+        true
+    }
+
+    /// A non-DOM host already hit-tests before dispatching its pointer event.
+    /// Apply that exact target without maintaining another hover authority.
+    pub fn set_hover_element(&mut self, target: Option<NodeId>) -> bool {
+        self.last_client_pointer_position = None;
+        self.hover_hit_node_id = target;
+        self.hover_node_is_text = false;
+        if target == self.hover_node_id {
+            return false;
+        }
+        let old_path = self.maybe_node_element_ancestors(self.hover_node_id);
+        let new_path = self.maybe_node_element_ancestors(target);
+        let shared = old_path
+            .iter()
+            .zip(&new_path)
+            .take_while(|(a, b)| a == b)
+            .count();
+        for &id in old_path.iter().skip(shared) {
+            self.snapshot_node_and(id, ElementState::HOVER, |node| node.unhover());
+        }
+        for &id in new_path.iter().skip(shared) {
+            self.snapshot_node_and(id, ElementState::HOVER, |node| node.hover());
+        }
+        self.hover_node_id = target;
+        self.shell_provider.request_redraw();
         true
     }
 
@@ -2420,6 +2521,33 @@ impl BaseDocument {
 
     /// Read a control value without requiring the element to have a layout box.
     pub fn input_value(&self, node_id: NodeId) -> Option<String> {
+        let value = self.input_text(node_id)?;
+        Some(
+            if self.is_number_input(node_id) && !valid_number_value(&value) {
+                String::new()
+            } else {
+                value
+            },
+        )
+    }
+
+    fn is_number_input(&self, node_id: NodeId) -> bool {
+        self.get_node(node_id)
+            .and_then(|node| node.element_data())
+            .and_then(|element| element.attr(local_name!("type")))
+            .is_some_and(|value| value.eq_ignore_ascii_case("number"))
+    }
+
+    /// Native editors retain an incomplete draft, while HTML's number value
+    /// and badInput state are derived from that one current editor string.
+    pub fn input_bad_input(&self, node_id: NodeId) -> bool {
+        self.is_number_input(node_id)
+            && self
+                .input_text(node_id)
+                .is_some_and(|text| !text.is_empty() && !valid_number_value(&text))
+    }
+
+    pub fn input_text(&self, node_id: NodeId) -> Option<String> {
         let node = self.get_node(node_id)?;
         let element = node.element_data()?;
         let multiline = element.text_input_is_multiline()?;
@@ -2447,6 +2575,16 @@ impl BaseDocument {
 
     /// Set the current value, retaining a distinct default value attribute.
     pub fn set_input_value(&mut self, node_id: NodeId, value: &str) -> bool {
+        let value = if self.is_number_input(node_id) && !valid_number_value(value) {
+            ""
+        } else {
+            value
+        };
+        self.set_input_text(node_id, value)
+    }
+
+    /// Accept a native editing draft without applying script value sanitization.
+    pub fn set_input_text(&mut self, node_id: NodeId, value: &str) -> bool {
         if !self.ensure_text_input(node_id) {
             return false;
         }
@@ -2828,6 +2966,43 @@ impl AsMut<BaseDocument> for BaseDocument {
     fn as_mut(&mut self) -> &mut BaseDocument {
         self
     }
+}
+
+/// HTML's valid floating-point-number grammar (not Rust's inf/NaN parser).
+fn valid_number_value(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut i = usize::from(bytes.first() == Some(&b'-'));
+    let integer_start = i;
+    while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+        i += 1;
+    }
+    let integer = i > integer_start;
+    if bytes.get(i) == Some(&b'.') {
+        i += 1;
+        let start = i;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if i == start {
+            return false;
+        }
+    } else if !integer {
+        return false;
+    }
+    if matches!(bytes.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(bytes.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        let start = i;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if i == start {
+            return false;
+        }
+    }
+    i == bytes.len() && value.parse::<f64>().is_ok_and(f64::is_finite)
 }
 
 #[cfg(test)]

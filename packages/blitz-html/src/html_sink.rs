@@ -167,7 +167,15 @@ impl<'m, 'doc> DocumentHtmlParser<'m, 'doc> {
         let document_id = mutr.doc.root_node().id;
         let fragment_root_id = mutr.last_child_id(document_id).unwrap();
         let child_ids = mutr.child_ids(fragment_root_id);
-        mutr.append_children(element_id, &child_ids);
+        let target = if mutr.doc.get_node(element_id).is_some_and(|node| {
+            node.data
+                .is_element_with_tag_name(&blitz_dom::local_name!("template"))
+        }) {
+            mutr.template_contents(element_id)
+        } else {
+            element_id
+        };
+        mutr.append_children(target, &child_ids);
         mutr.remove_and_drop_node(fragment_root_id);
     }
 }

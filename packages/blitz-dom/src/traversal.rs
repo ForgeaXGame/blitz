@@ -294,7 +294,7 @@ impl BaseDocument {
                 break;
             }
             ancestors.push(id);
-            maybe_id = node.parent;
+            maybe_id = node.flat_parent();
         }
         ancestors.reverse();
         ancestors

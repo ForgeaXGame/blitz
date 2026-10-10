@@ -190,7 +190,7 @@ mod tests {
         let shadow = m.attach_shadow(host).unwrap();
         assert!(m.attach_shadow(host).is_err());
         let style = m.create_element(qual_name!("style", html), vec![]);
-        let css = m.create_text_node(":host{display:block;width:100px}span{display:block;width:20px;height:10px}:host(.wide) span{width:40px}");
+        let css = m.create_text_node(":host{display:block;width:100px}span{display:block;width:20px;height:10px}:host(.wide) span{width:40px}:host(:hover){opacity:.25}span:active{opacity:.5}@media(prefers-reduced-motion:reduce){span{height:20px}}");
         m.append_children(style, &[css]);
         let child = m.create_element(qual_name!("span", html), vec![]);
         m.append_children(shadow, &[style, child]);
@@ -201,6 +201,24 @@ mod tests {
         assert_eq!(doc.nodes[child].parent, Some(shadow));
         assert!(doc.nodes[host].children.is_empty());
         assert_eq!(doc.nodes[child].final_layout().size.width, 20.0);
+        doc.set_hover_element(Some(child));
+        doc.set_active_element(Some(child));
+        doc.resolve(0.0);
+        assert_eq!(
+            doc.nodes[host].primary_styles().unwrap().clone_opacity(),
+            0.25
+        );
+        assert_eq!(
+            doc.nodes[child].primary_styles().unwrap().clone_opacity(),
+            0.5
+        );
+        doc.clear_hover();
+        doc.unactive_node();
+        let mut viewport = doc.get_viewport();
+        viewport.prefers_reduced_motion = true;
+        doc.set_viewport(viewport);
+        doc.resolve(0.0);
+        assert_eq!(doc.nodes[child].final_layout().size.height, 20.0);
         doc.mutate()
             .set_attribute(host, qual_name!("class"), "wide");
         doc.resolve(0.0);

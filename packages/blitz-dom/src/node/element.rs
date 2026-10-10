@@ -320,7 +320,11 @@ impl Clone for ElementData {
             stylo_element_data: Default::default(),
             selector_flags: Cell::new(ElementSelectorFlags::empty()),
             guard: self.guard.clone(),
-            element_state: self.element_state,
+            element_state: self.element_state
+                - (ElementState::HOVER
+                    | ElementState::ACTIVE
+                    | ElementState::FOCUS
+                    | ElementState::FOCUSRING),
             has_snapshot: false,
             snapshot_handled: AtomicBool::new(false),
             dirty_descendants: AtomicBool::new(true),

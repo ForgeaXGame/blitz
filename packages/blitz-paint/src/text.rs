@@ -1,9 +1,13 @@
-use anyrender::PaintScene;
+use anyrender::{
+    PaintScene,
+    filters::{Filter, FilterEffect},
+};
 use blitz_dom::{BaseDocument, NodeId, node::TextBrush, util::ToColorColor};
 use kurbo::{Affine, BezPath, Cap, Circle, Rect, Stroke};
 use parley::{Affinity, Cursor, Layout, Line, PositionedLayoutItem, Selection};
-use peniko::Fill;
+use peniko::{Fill, Mix};
 use std::collections::HashMap;
+use std::sync::Arc;
 use style::properties::generated::longhands::text_decoration_style::computed_value::T as TextDecorationStyle;
 use style::values::computed::{
     Length, LengthPercentage, TextDecorationLength, TextDecorationLine, TextUnderlinePosition,
@@ -562,15 +566,122 @@ fn flush_line_decorations(
     }
 }
 
+fn glyph_embolden(font_size: f32, scale: f64, synthesize_bold: bool) -> kurbo::Vec2 {
+    // Parley resolves real weight faces/axes first. Its synthesis request is
+    // used only when the prepared font has no matching bold face.
+    if synthesize_bold {
+        let radius = f64::from(font_size) * 0.025;
+        kurbo::Vec2::new(radius, radius)
+    } else if FONT_EMBOLDEN_ENABLED {
+        let fs = f64::from(font_size) / scale;
+        kurbo::Vec2::new((0.015125 * fs).min(0.3), (0.0121 * fs).min(0.3))
+    } else {
+        kurbo::Vec2::default()
+    }
+}
+
 pub(crate) fn stroke_text<'a>(
     scene: &mut impl PaintScene,
-    lines: impl Iterator<Item = Line<'a, TextBrush>>,
+    lines: impl Iterator<Item = Line<'a, TextBrush>> + Clone,
     doc: &BaseDocument,
     transform: Affine,
     scale: f64,
     inline_root_id: NodeId,
     context: &mut DrawTextContext,
 ) {
+    // Shadows inherit with the run's computed style. Paint every shadow before
+    // the foreground glyphs (including later runs/lines), with the first CSS
+    // shadow on top. Offsets/blur are CSS pixels; Parley's positions are scaled.
+    let shadow_count = lines
+        .clone()
+        .flat_map(|line| line.items())
+        .filter_map(|item| {
+            let PositionedLayoutItem::GlyphRun(run) = item else {
+                return None;
+            };
+            doc.get_node(run.style().brush.id)?
+                .primary_styles()
+                .map(|styles| styles.clone_text_shadow().0.len())
+        })
+        .max()
+        .unwrap_or(0);
+    for index in (0..shadow_count).rev() {
+        for line in lines.clone() {
+            for item in line.items() {
+                let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                    continue;
+                };
+                let Some(styles) = doc
+                    .get_node(glyph_run.style().brush.id)
+                    .and_then(|node| node.primary_styles())
+                else {
+                    continue;
+                };
+                let shadows = styles.clone_text_shadow();
+                let Some(shadow) = shadows.0.get(index) else {
+                    continue;
+                };
+                let color = shadow
+                    .color
+                    .resolve_to_absolute(&styles.clone_color())
+                    .as_color_color();
+                let run = glyph_run.run();
+                let font_size = run.font_size();
+                let metrics = run.font_metrics();
+                let shadow_transform = transform
+                    * Affine::translate((
+                        f64::from(shadow.horizontal.px()) * scale,
+                        f64::from(shadow.vertical.px()) * scale,
+                    ));
+                // CSS shadow blur radius corresponds to twice Gaussian sigma.
+                let sigma = f64::from(shadow.blur.px()) * scale / 2.0;
+                if sigma > 0.0 {
+                    let filter = Filter::single(FilterEffect::blur(sigma as f32));
+                    let outset = f64::from(font_size) + sigma * 3.0;
+                    let clip = Rect::new(
+                        f64::from(glyph_run.offset()) - outset,
+                        f64::from(glyph_run.baseline() - metrics.ascent) - outset,
+                        f64::from(glyph_run.offset() + glyph_run.advance()) + outset,
+                        f64::from(glyph_run.baseline() + metrics.descent) + outset,
+                    );
+                    scene.push_layer(
+                        Fill::NonZero,
+                        Mix::Normal,
+                        1.0,
+                        shadow_transform,
+                        &clip,
+                        Some(Arc::new(filter)),
+                        None,
+                    );
+                }
+                let glyph_xform = run
+                    .synthesis()
+                    .skew()
+                    .map(|angle| Affine::skew(angle.to_radians().tan() as f64, 0.0));
+                let embolden = glyph_embolden(font_size, scale, run.synthesis().embolden());
+                scene.draw_glyphs(
+                    run.font(),
+                    font_size,
+                    !FONT_EMBOLDEN_ENABLED,
+                    bytemuck::cast_slice(run.normalized_coords()),
+                    embolden,
+                    Fill::NonZero,
+                    &anyrender::Paint::from(color),
+                    1.0,
+                    shadow_transform,
+                    glyph_xform,
+                    glyph_run.positioned_glyphs().map(|glyph| anyrender::Glyph {
+                        id: glyph.id as _,
+                        x: glyph.x,
+                        y: glyph.y,
+                    }),
+                );
+                if sigma > 0.0 {
+                    scene.pop_layer();
+                }
+            }
+        }
+    }
     let DrawTextContext {
         stack,
         path_scratch,
@@ -637,12 +748,7 @@ pub(crate) fn stroke_text<'a>(
                 // inherits, so the innermost inline element already carries the right value.
                 let text_color = stack.last().map(|e| e.text_color).unwrap_or(Color::BLACK);
 
-                let embolden = if FONT_EMBOLDEN_ENABLED {
-                    let fs = font_size as f64 / scale;
-                    kurbo::Vec2::new((0.015125 * fs).min(0.3), (0.0121 * fs).min(0.3))
-                } else {
-                    kurbo::Vec2::default()
-                };
+                let embolden = glyph_embolden(font_size, scale, synthesis.embolden());
 
                 let normalized_coords: &[i16] = bytemuck::cast_slice(run.normalized_coords());
                 scene.draw_glyphs(

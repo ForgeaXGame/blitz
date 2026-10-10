@@ -365,6 +365,9 @@ impl DocumentMutator<'_> {
 
         if *attr == local_name!("disabled") && element.can_be_disabled() {
             node.disable();
+            if self.doc.get_focussed_node_id() == Some(node_id) {
+                self.doc.clear_focus();
+            }
             return;
         }
 
@@ -906,7 +909,15 @@ impl<'doc> DocumentMutator<'doc> {
         // Fragment replacement detaches the old children. A script may still
         // hold any of those nodes and can reinsert them after this operation.
         // Embedders may explicitly drop unreachable detached subtrees.
-        self.replace_children(node_id, &[]);
+        let target = if self.doc.nodes[node_id]
+            .data
+            .is_element_with_tag_name(&local_name!("template"))
+        {
+            self.template_contents(node_id)
+        } else {
+            node_id
+        };
+        self.replace_children(target, &[]);
         self.doc
             .html_parser_provider
             .clone()
@@ -1412,6 +1423,48 @@ mod test {
             .mutate()
             .clear_attribute(cloned, qual_name!("value"));
         assert_eq!(document.input_value(cloned).as_deref(), Some("3.25"));
+    }
+
+    #[test]
+    fn numeric_editing_retains_bad_draft_but_script_values_are_sanitized() {
+        let mut document = BaseDocument::new(DocumentConfig::default());
+        let id = document.mutate().create_element(
+            qual_name!("input", html),
+            vec![Attribute {
+                name: qual_name!("type"),
+                value: "number".into(),
+            }],
+        );
+        for draft in ["-", "1e-", "+1", "NaN", "inf", "1.", " 1", "1e999"] {
+            document.set_input_text(id, draft);
+            assert_eq!(document.input_text(id).as_deref(), Some(draft));
+            assert_eq!(document.input_value(id).as_deref(), Some(""));
+            assert!(document.input_bad_input(id), "{draft}");
+            document.set_input_value(id, draft);
+            assert!(!document.input_bad_input(id));
+        }
+        for value in [".1", "-0.1", "1e+2", "1E-2", "0"] {
+            document.set_input_value(id, value);
+            assert_eq!(document.input_value(id).as_deref(), Some(value));
+            assert!(!document.input_bad_input(id));
+        }
+    }
+
+    #[test]
+    fn template_clones_own_independent_inert_content() {
+        let mut document = BaseDocument::new(DocumentConfig::default());
+        let mut mutation = document.mutate();
+        let template = mutation.create_element(qual_name!("template", html), vec![]);
+        let content = mutation.template_contents(template);
+        let child = mutation.create_text_node("original");
+        mutation.append_children(content, &[child]);
+        let cloned = mutation.deep_clone_node(template);
+        let cloned_content = mutation.template_contents(cloned);
+        assert_ne!(content, cloned_content);
+        let cloned_child = mutation.child_ids(cloned_content)[0];
+        mutation.set_node_text(cloned_child, "changed");
+        assert_eq!(mutation.doc.nodes[child].text_content(), "original");
+        assert_eq!(mutation.doc.nodes[cloned_child].text_content(), "changed");
     }
 
     #[test]

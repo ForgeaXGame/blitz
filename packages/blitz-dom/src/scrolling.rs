@@ -263,7 +263,7 @@ impl BaseDocument {
             ScrollTarget::Node(node_id) => Some(
                 self.nodes
                     .get(node_id)
-                    .and_then(|node| node.parent)
+                    .and_then(|node| node.flat_parent())
                     .map_or(ScrollTarget::Viewport, ScrollTarget::Node),
             ),
         }
