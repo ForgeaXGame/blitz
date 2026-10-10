@@ -1290,6 +1290,16 @@ impl BaseDocument {
     pub fn load_resource(&mut self, res: ResourceLoadResponse) {
         self.pending_critical_resources.remove(&res.request_id);
 
+        // Stylesheet/font publications belong to their source node. A late
+        // response from a removed UI instance must not register old fonts or CSS.
+        if matches!(&res.result, Ok(Resource::Font(..) | Resource::Css(..)))
+            && res.node_id.is_some_and(|id| {
+                self.get_node(id)
+                    .is_none_or(|node| !node.flags.is_in_document())
+            })
+        {
+            return;
+        }
         let resource = match res.result {
             Ok(resource) => resource,
             Err(err) => {
