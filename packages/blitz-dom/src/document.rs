@@ -342,6 +342,8 @@ pub struct BaseDocument {
     // Tracks in-flight "critical" resources (e.g. stylesheets linked from the `<head>`),
     // keyed by request id
     pub(crate) pending_critical_resources: HashSet<usize>,
+    /// Failures awaiting observation by an embedding host.
+    resource_errors: Vec<(Option<String>, String)>,
 
     // Service providers
     /// Network provider. Can be used to fetch assets.
@@ -486,6 +488,7 @@ impl BaseDocument {
             pending_images: HashMap::new(),
             pending_style_image_nodes: Vec::new(),
             pending_critical_resources: HashSet::new(),
+            resource_errors: Vec::new(),
             controls_to_form: HashMap::new(),
             net_provider,
             navigation_provider,
@@ -1278,12 +1281,20 @@ impl BaseDocument {
         !self.pending_critical_resources.is_empty()
     }
 
+    /// Drain transport, decoding and font-registration failures without retaining
+    /// a second resource catalogue in the embedding host.
+    pub fn take_resource_errors(&mut self) -> Vec<(Option<String>, String)> {
+        std::mem::take(&mut self.resource_errors)
+    }
+
     pub fn load_resource(&mut self, res: ResourceLoadResponse) {
         self.pending_critical_resources.remove(&res.request_id);
 
         let resource = match res.result {
             Ok(resource) => resource,
             Err(err) => {
+                self.resource_errors
+                    .push((res.resolved_url.clone(), err.clone()));
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
                     #[cfg(feature = "tracing")]
@@ -1363,9 +1374,14 @@ impl BaseDocument {
 
                 // TODO: Investigate eliminating double-box
                 let mut global_font_ctx = self.font_ctx.lock().unwrap();
-                global_font_ctx
+                let registered = global_font_ctx
                     .collection
                     .register_fonts(font.clone(), Some(info_override));
+                if registered.is_empty() {
+                    self.resource_errors
+                        .push((res.resolved_url, "Invalid font data".into()));
+                    return;
+                }
 
                 #[cfg(feature = "parallel-construct")]
                 {

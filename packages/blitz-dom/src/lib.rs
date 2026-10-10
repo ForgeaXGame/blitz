@@ -131,7 +131,19 @@ pub use util::{Point, decode_font_bytes};
 /// browsers don't expose system fonts. WOFF/WOFF2 inputs are decoded
 /// automatically.
 pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
-    use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
+    build_single_font_ctx_with_family(font_data, None).unwrap_or_default()
+}
+
+/// As above, with an optional CSS family alias. Later `@font-face` subsets
+/// registered under that alias extend the same generic fallback family.
+/// Invalid nonempty input is a construction error, not silent missing text.
+pub fn build_single_font_ctx_with_family(
+    font_data: &[u8],
+    family_name: Option<&str>,
+) -> Result<FontContext, String> {
+    use parley::fontique::{
+        Blob, Collection, CollectionOptions, FontInfoOverride, GenericFamily, SourceCache,
+    };
     use std::sync::Arc;
 
     let mut ctx = FontContext {
@@ -142,9 +154,16 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
         }),
     };
     let decoded = decode_font_bytes(font_data).into_owned();
-    let registered = ctx
-        .collection
-        .register_fonts(Blob::new(Arc::new(decoded) as _), None);
+    let registered = ctx.collection.register_fonts(
+        Blob::new(Arc::new(decoded) as _),
+        Some(FontInfoOverride {
+            family_name,
+            ..Default::default()
+        }),
+    );
+    if !font_data.is_empty() && registered.is_empty() {
+        return Err("Invalid bootstrap font data".into());
+    }
     let family_ids: Vec<_> = registered.iter().map(|(id, _)| *id).collect();
     for generic in [
         GenericFamily::SansSerif,
@@ -155,5 +174,5 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
         ctx.collection
             .append_generic_families(generic, family_ids.iter().copied());
     }
-    ctx
+    Ok(ctx)
 }

@@ -33,6 +33,9 @@ pub trait NetProvider: Send + Sync + 'static {
 /// the NetCallack with the result.
 pub trait NetHandler: Send + Sync + 'static {
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes);
+
+    /// Complete a failed transport through the same resource lifecycle.
+    fn failed(self: Box<Self>, resolved_url: String, message: String);
 }
 
 /// A callback which gets called every time a network request completes

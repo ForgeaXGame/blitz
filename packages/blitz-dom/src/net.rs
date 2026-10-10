@@ -141,6 +141,10 @@ pub struct StylesheetHandler {
 }
 
 impl NetHandler for ResourceHandler<StylesheetHandler> {
+    fn failed(self: Box<Self>, resolved_url: String, message: String) {
+        self.respond(resolved_url, Err(message));
+    }
+
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let Ok(css) = std::str::from_utf8(&bytes) else {
             return self.respond(resolved_url, Err(String::from("Invalid UTF8")));
@@ -258,6 +262,10 @@ struct NestedStylesheetHandler {
 }
 
 impl NetHandler for ResourceHandler<NestedStylesheetHandler> {
+    fn failed(self: Box<Self>, resolved_url: String, message: String) {
+        self.respond(resolved_url, Err(message));
+    }
+
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let Ok(css) = std::str::from_utf8(&bytes) else {
             return self.respond(resolved_url, Err(String::from("Invalid UTF8")));
@@ -300,6 +308,10 @@ struct FontFaceHandler {
     overrides: FontFaceOverrides,
 }
 impl NetHandler for ResourceHandler<FontFaceHandler> {
+    fn failed(self: Box<Self>, resolved_url: String, message: String) {
+        self.respond(resolved_url, Err(message));
+    }
+
     fn bytes(mut self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let result = self.data.parse(bytes);
         self.respond(resolved_url, result)
@@ -341,14 +353,10 @@ impl FontFaceHandler {
                 tracing::info!("Decompressing woff1 font");
 
                 // Use wuff crate to decompress font
-                let decompressed = wuff::decompress_woff1(&bytes).ok();
-
-                if let Some(decompressed) = decompressed {
-                    bytes = Bytes::from(decompressed);
-                } else {
-                    #[cfg(feature = "tracing")]
-                    tracing::warn!("Failed to decompress woff1 font");
-                }
+                bytes = Bytes::from(
+                    wuff::decompress_woff1(&bytes)
+                        .map_err(|error| format!("Invalid WOFF font: {error:?}"))?,
+                );
             }
             #[cfg(feature = "woff")]
             FontFaceSourceFormatKeyword::Woff2 => {
@@ -356,18 +364,13 @@ impl FontFaceHandler {
                 tracing::info!("Decompressing woff2 font");
 
                 // Use wuff crate to decompress font
-                let decompressed = wuff::decompress_woff2(&bytes).ok();
-
-                if let Some(decompressed) = decompressed {
-                    bytes = Bytes::from(decompressed);
-                } else {
-                    #[cfg(feature = "tracing")]
-                    tracing::warn!("Failed to decompress woff2 font");
-                }
+                bytes = Bytes::from(
+                    wuff::decompress_woff2(&bytes)
+                        .map_err(|error| format!("Invalid WOFF2 font: {error:?}"))?,
+                );
             }
             FontFaceSourceFormatKeyword::None => {
-                // Should this be an error?
-                return Ok(Resource::None);
+                return Err("Unknown font format".into());
             }
             _ => {}
         }
@@ -545,6 +548,10 @@ fn stylo_to_fontique_style(style: &FontStyleRange) -> parley::fontique::FontStyl
 pub(crate) struct DocumentSrcHandler;
 
 impl NetHandler for ResourceHandler<DocumentSrcHandler> {
+    fn failed(self: Box<Self>, resolved_url: String, message: String) {
+        self.respond(resolved_url, Err(message));
+    }
+
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let html = String::from_utf8_lossy(&bytes).into_owned();
         self.respond(resolved_url, Ok(Resource::DocumentSrc(html)));
@@ -561,6 +568,10 @@ impl ImageHandler {
 }
 
 impl NetHandler for ResourceHandler<ImageHandler> {
+    fn failed(self: Box<Self>, resolved_url: String, message: String) {
+        self.respond(resolved_url, Err(message));
+    }
+
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let result = self.data.parse(bytes);
         self.respond(resolved_url, result)
