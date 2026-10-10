@@ -8,9 +8,7 @@ use crate::net::{ImageHandler, ResourceHandler, StylesheetHandler};
 use crate::node::{CanvasData, NodeFlags, SpecialElementData};
 use crate::stylo_device::DeviceChanges;
 use crate::util::ImageType;
-use crate::{
-    Attribute, BaseDocument, Document, ElementData, Node, NodeData, QualName, local_name, qual_name,
-};
+use crate::{Attribute, BaseDocument, Document, ElementData, Node, NodeData, QualName, local_name};
 use blitz_traits::shell::Viewport;
 use style::Atom;
 use style::invalidation::element::restyle_hints::RestyleHint;
@@ -371,6 +369,16 @@ impl DocumentMutator<'_> {
             return;
         }
 
+        if *tag == local_name!("input")
+            && matches!(attr.as_ref(), "checked" | "type" | "name" | "form")
+        {
+            if matches!(attr.as_ref(), "checked" | "type") {
+                element.sync_checked_attribute();
+            }
+            self.doc.reconcile_radio_group(node_id);
+            return;
+        }
+
         // If node if not in the document, then don't apply any special behaviours
         // and simply set the attribute value
         if !node.flags.is_in_document() {
@@ -383,9 +391,7 @@ impl DocumentMutator<'_> {
             return;
         }
 
-        if (tag, attr) == tag_and_attr!("input", "checked") {
-            set_input_checked_state(element, value.to_string());
-        } else if (tag, attr) == tag_and_attr!("img", "src") {
+        if (tag, attr) == tag_and_attr!("img", "src") {
             self.load_image(node_id);
         } else if (tag, attr) == tag_and_attr!("canvas", "src") {
             self.load_custom_paint_src(node_id);
@@ -485,6 +491,16 @@ impl DocumentMutator<'_> {
 
         if *attr == local_name!("disabled") && element.can_be_disabled() {
             node.enable();
+            return;
+        }
+
+        if *tag == local_name!("input")
+            && matches!(attr.as_ref(), "checked" | "type" | "name" | "form")
+        {
+            if matches!(attr.as_ref(), "checked" | "type") {
+                element.sync_checked_attribute();
+            }
+            self.doc.reconcile_radio_group(node_id);
             return;
         }
 
@@ -731,6 +747,13 @@ impl DocumentMutator<'_> {
                 self.process_added_subtree(child_id);
             } else if !new_parent_is_in_document && child_was_in_doc {
                 self.process_removed_subtree(child_id);
+            }
+            let checked: Vec<_> =
+                crate::traversal::TreeTraverser::new_with_root(self.doc, child_id)
+                    .filter(|id| self.doc.input_checked(*id) == Some(true))
+                    .collect();
+            for id in checked.into_iter().rev() {
+                self.doc.reconcile_radio_group(id);
             }
         }
 
@@ -1064,7 +1087,7 @@ impl<'doc> DocumentMutator<'doc> {
                 }
                 SpecialElementData::TableRoot(_) => {}
                 SpecialElementData::TextInput(_) => {}
-                SpecialElementData::CheckboxInput(_) => {}
+                SpecialElementData::CheckboxInput { .. } => {}
                 #[cfg(feature = "file-input")]
                 SpecialElementData::FileInput(_) => {}
                 SpecialElementData::None => {}
@@ -1310,25 +1333,6 @@ impl<'doc> DocumentMutator<'doc> {
             self.append_children(label_id, &[text_id]);
             self.append_children(button_id, &[button_text_id]);
         }
-    }
-}
-
-/// Set 'checked' state on an input based on given attributevalue
-fn set_input_checked_state(element: &mut ElementData, value: String) {
-    let Ok(checked) = value.parse() else {
-        return;
-    };
-    match element.special_data {
-        SpecialElementData::CheckboxInput(_) => element.set_checkbox_input_checked(checked),
-        // If we have just constructed the element, set the node attribute,
-        // and NodeSpecificData will be created from that later
-        // this simulates the checked attribute being set in html,
-        // and the element's checked property being set from that
-        SpecialElementData::None => element.attrs.push(Attribute {
-            name: qual_name!("checked", html),
-            value: checked.to_string(),
-        }),
-        _ => {}
     }
 }
 

@@ -35,30 +35,31 @@ impl BaseDocument {
     ///
     /// <https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#reset-the-form-owner>
     pub fn reset_form_owner(&mut self, node_id: NodeId) {
-        let node = &self.nodes[node_id];
-        let Some(element) = node.element_data() else {
-            return;
-        };
+        if let Some(final_owner_id) = self.form_owner(node_id) {
+            self.controls_to_form.insert(node_id, final_owner_id);
+        } else {
+            self.controls_to_form.remove(&node_id);
+        }
+    }
 
-        // First try explicit form attribute
-        let final_owner_id = element
-            .attr(local_name!("form"))
-            .and_then(|owner| self.get_element_by_id(owner))
-            .filter(|owner_id| {
-                self.get_node(*owner_id)
-                    .is_some_and(|node| node.data.is_element_with_tag_name(&local_name!("form")))
-            })
-            .or_else(|| {
-                AncestorTraverser::new(self, node_id).find(|ancestor_id| {
-                    self.nodes[*ancestor_id]
+    /// Derive current ownership from the DOM tree, including detached and shadow trees.
+    pub fn form_owner(&self, node_id: NodeId) -> Option<NodeId> {
+        let node = self.get_node(node_id)?;
+        let element = node.element_data()?;
+        if let Some(owner) = element.attr(local_name!("form")) {
+            return TreeTraverser::new_with_root(self, node.tree_root_id())
+                .find(|id| self.nodes[*id].attr(local_name!("id")) == Some(owner))
+                .filter(|id| {
+                    self.nodes[*id]
                         .data
                         .is_element_with_tag_name(&local_name!("form"))
-                })
-            });
-
-        if let Some(final_owner_id) = final_owner_id {
-            self.controls_to_form.insert(node_id, final_owner_id);
+                });
         }
+        AncestorTraverser::new(self, node_id).find(|id| {
+            self.nodes[*id]
+                .data
+                .is_element_with_tag_name(&local_name!("form"))
+        })
     }
 
     /// Submits a form with the given form node ID and submitter node ID

@@ -12,6 +12,15 @@ pub struct ShadowData {
 }
 
 impl Node {
+    /// DOM root, without crossing a ShadowRoot into its host.
+    pub fn tree_root_id(&self) -> NodeId {
+        let mut node = self;
+        while let Some(parent) = node.parent {
+            node = self.with(parent);
+        }
+        node.id
+    }
+
     pub fn shadow_root_id(&self) -> Option<NodeId> {
         self.element_data().and_then(|data| data.shadow_root)
     }

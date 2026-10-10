@@ -372,8 +372,8 @@ pub enum SpecialElementData {
     TableRoot(Arc<TableContext>),
     /// Parley text editor (text inputs)
     TextInput(TextInputData),
-    /// Checkbox checked state
-    CheckboxInput(bool),
+    /// Checkedness lives in ElementState; this records divergence from the default attribute.
+    CheckboxInput { dirty: bool },
     /// Selected files
     #[cfg(feature = "file-input")]
     FileInput(FileData),
@@ -393,7 +393,7 @@ impl Clone for SpecialElementData {
             Self::Canvas(data) => Self::Canvas(data.clone()),
             Self::TableRoot(data) => Self::TableRoot(data.clone()),
             Self::TextInput(data) => Self::TextInput(data.clone()),
-            Self::CheckboxInput(data) => Self::CheckboxInput(*data),
+            Self::CheckboxInput { dirty } => Self::CheckboxInput { dirty: *dirty },
             #[cfg(feature = "file-input")]
             Self::FileInput(data) => Self::FileInput(data.clone()),
             Self::None => Self::None,
@@ -447,17 +447,7 @@ impl ElementData {
         data.flush_is_focussable();
         data.flush_link_state();
 
-        // Mirror the `checked` attribute into the element state so that `:checked`
-        // selectors can be matched (and invalidated) from `ElementState`.
-        if data.name.local == local_name!("input")
-            && matches!(
-                data.attr(local_name!("type")),
-                Some("checkbox") | Some("radio")
-            )
-            && data.has_attr(local_name!("checked"))
-        {
-            data.element_state.insert(ElementState::CHECKED);
-        }
+        data.ensure_checkbox_input();
 
         // The element state needs to be modified if the element can be disabled.
         if data.can_be_disabled() {
@@ -621,26 +611,57 @@ impl ElementData {
     }
 
     pub fn checkbox_input_checked(&self) -> Option<bool> {
-        match self.special_data {
-            SpecialElementData::CheckboxInput(checked) => Some(checked),
-            _ => None,
+        if !self.is_checkable_input() {
+            return None;
+        }
+        Some(match self.special_data {
+            SpecialElementData::CheckboxInput { .. } => {
+                self.element_state.contains(ElementState::CHECKED)
+            }
+            _ => self.has_attr(local_name!("checked")),
+        })
+    }
+
+    fn is_checkable_input(&self) -> bool {
+        self.name.local == local_name!("input")
+            && self.attr(local_name!("type")).is_some_and(|kind| {
+                kind.eq_ignore_ascii_case("checkbox") || kind.eq_ignore_ascii_case("radio")
+            })
+    }
+
+    pub(crate) fn ensure_checkbox_input(&mut self) {
+        if self.is_checkable_input()
+            && !matches!(self.special_data, SpecialElementData::CheckboxInput { .. })
+        {
+            self.special_data = SpecialElementData::CheckboxInput { dirty: false };
+            self.element_state
+                .set(ElementState::CHECKED, self.has_attr(local_name!("checked")));
         }
     }
 
-    pub fn checkbox_input_checked_mut(&mut self) -> Option<&mut bool> {
-        match self.special_data {
-            SpecialElementData::CheckboxInput(ref mut checked) => Some(checked),
-            _ => None,
+    pub(crate) fn sync_checked_attribute(&mut self) {
+        self.ensure_checkbox_input();
+        if matches!(
+            self.special_data,
+            SpecialElementData::CheckboxInput { dirty: false }
+        ) {
+            self.element_state
+                .set(ElementState::CHECKED, self.has_attr(local_name!("checked")));
         }
     }
 
-    /// Set the checked state of a checkbox/radio input, keeping the
-    /// `ElementState::CHECKED` bit (used for `:checked` selector matching and
-    /// invalidation) in sync with the special data.
+    /// A script/user write makes checkedness independent of the default attribute.
     pub fn set_checkbox_input_checked(&mut self, checked: bool) {
-        if let Some(is_checked) = self.checkbox_input_checked_mut() {
-            *is_checked = checked;
+        self.ensure_checkbox_input();
+        if let SpecialElementData::CheckboxInput { dirty } = &mut self.special_data {
+            *dirty = true;
         }
+        self.set_checkbox_checkedness(checked);
+    }
+
+    /// Group exclusion changes current checkedness without dirtying a peer's default.
+    pub(crate) fn set_checkbox_checkedness(&mut self, checked: bool) {
+        self.ensure_checkbox_input();
         self.element_state.set(ElementState::CHECKED, checked);
     }
 
@@ -927,7 +948,9 @@ impl std::fmt::Debug for SpecialElementData {
             SpecialElementData::Canvas(_) => f.write_str("NodeSpecificData::Canvas"),
             SpecialElementData::TableRoot(_) => f.write_str("NodeSpecificData::TableRoot"),
             SpecialElementData::TextInput(_) => f.write_str("NodeSpecificData::TextInput"),
-            SpecialElementData::CheckboxInput(_) => f.write_str("NodeSpecificData::CheckboxInput"),
+            SpecialElementData::CheckboxInput { .. } => {
+                f.write_str("NodeSpecificData::CheckboxInput")
+            }
             #[cfg(feature = "file-input")]
             SpecialElementData::FileInput(_) => f.write_str("NodeSpecificData::FileInput"),
             SpecialElementData::None => f.write_str("NodeSpecificData::None"),

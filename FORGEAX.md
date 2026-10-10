@@ -12,6 +12,7 @@ fixes the resolved headless dependency graph. Upstream licenses remain unchanged
 | Number controls reserve the same intrinsic text height as other single-line editors; buttons use border-box dimensions | Engine UI core glyph/height and browser rectangle regressions |
 | Prepared bootstrap fonts populate native script fallbacks as well as generic families; named author fonts can fall back to published subsets without OS discovery | Engine `authored_latin_family_uses_published_bootstrap_for_missing_arrow` and the generated-WASM Latin-only UiAsset arrow comparison |
 | Every document registers its builtin Bullet font, including supplied font contexts; disclosure and list markers do not depend on host font coverage | `document::font_face_override_tests::supplied_font_context_retains_builtin_marker_font`; Engine generated-WASM implicit/explicit Bullet pixel comparison covers details, lists and controls |
+| Checkbox/radio checkedness has one native ElementState, a dirty-default flag and DOM/form-scoped radio exclusion; script state is available before layout | Engine `checked_state_defaults_and_radio_groups_have_native_ownership`; real-WASM/Chromium property, cancellation, pointer, label and keyboard comparisons |
 | Removed font/stylesheet nodes cannot adopt late resource results | Engine `removed_font_stylesheet_rejects_its_late_response` |
 
 `BaseDocument::input_value` and `set_input_value` share the same Parley editor used

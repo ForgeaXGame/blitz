@@ -679,27 +679,71 @@ impl BaseDocument {
         checked
     }
 
-    pub fn toggle_radio(&mut self, radio_set_name: String, target_radio_id: NodeId) {
-        let radio_ids: Vec<NodeId> = self
-            .nodes
-            .iter()
-            .filter_map(|(i, node)| {
-                let el = node.data.downcast_element()?;
-                (el.attr(local_name!("name")) == Some(&radio_set_name)
-                    && el.checkbox_input_checked().is_some())
-                .then_some(i)
-            })
-            .collect();
+    pub fn input_checked(&self, node_id: NodeId) -> Option<bool> {
+        self.get_node(node_id)?
+            .element_data()?
+            .checkbox_input_checked()
+    }
 
-        for i in radio_ids {
-            let checked = i == target_radio_id;
-            self.snapshot_node_and(i, ElementState::CHECKED, |node| {
-                if let Some(el) = node.element_data_mut() {
-                    el.set_checkbox_input_checked(checked);
-                }
+    /// Radios share checkedness only with radios in the same DOM tree and form,
+    /// with the same nonempty name. No host-side group catalogue is needed.
+    pub fn radio_group(&self, node_id: NodeId) -> Vec<NodeId> {
+        let Some(node) = self.get_node(node_id) else {
+            return Vec::new();
+        };
+        if !node
+            .attr(local_name!("type"))
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("radio"))
+        {
+            return Vec::new();
+        }
+        let name = node.attr(local_name!("name")).unwrap_or("");
+        if name.is_empty() {
+            return vec![node_id];
+        }
+        let form = self.form_owner(node_id);
+        TreeTraverser::new_with_root(self, node.tree_root_id())
+            .filter(|id| {
+                let peer = &self.nodes[*id];
+                peer.data.is_element_with_tag_name(&local_name!("input"))
+                    && peer
+                        .attr(local_name!("type"))
+                        .is_some_and(|kind| kind.eq_ignore_ascii_case("radio"))
+                    && peer.attr(local_name!("name")) == Some(name)
+                    && self.form_owner(*id) == form
+            })
+            .collect()
+    }
+
+    pub(crate) fn reconcile_radio_group(&mut self, node_id: NodeId) {
+        if self.input_checked(node_id) != Some(true) {
+            return;
+        }
+        for peer in self.radio_group(node_id) {
+            if peer == node_id || self.input_checked(peer) != Some(true) {
+                continue;
+            }
+            self.snapshot_node_and(peer, ElementState::CHECKED, |node| {
+                node.element_data_mut()
+                    .unwrap()
+                    .set_checkbox_checkedness(false);
                 node.mark_ancestors_dirty();
             });
         }
+    }
+
+    pub fn set_input_checked(&mut self, node_id: NodeId, checked: bool) -> bool {
+        if self.input_checked(node_id).is_none() {
+            return false;
+        }
+        self.snapshot_node_and(node_id, ElementState::CHECKED, |node| {
+            node.element_data_mut()
+                .unwrap()
+                .set_checkbox_input_checked(checked);
+            node.mark_ancestors_dirty();
+        });
+        self.reconcile_radio_group(node_id);
+        true
     }
 
     /// Toggle the `open` attribute of a `<details>` element, expanding or
@@ -2548,6 +2592,14 @@ impl BaseDocument {
 
     /// Read a control value without requiring the element to have a layout box.
     pub fn input_value(&self, node_id: NodeId) -> Option<String> {
+        if self.input_checked(node_id).is_some() {
+            return Some(
+                self.nodes[node_id]
+                    .attr(local_name!("value"))
+                    .unwrap_or("on")
+                    .to_string(),
+            );
+        }
         let value = self.input_text(node_id)?;
         Some(
             if self.is_number_input(node_id) && !valid_number_value(&value) {
@@ -2602,6 +2654,11 @@ impl BaseDocument {
 
     /// Set the current value, retaining a distinct default value attribute.
     pub fn set_input_value(&mut self, node_id: NodeId, value: &str) -> bool {
+        if self.input_checked(node_id).is_some() {
+            self.mutate()
+                .set_attribute(node_id, crate::qual_name!("value"), value);
+            return true;
+        }
         let value = if self.is_number_input(node_id) && !valid_number_value(value) {
             ""
         } else {

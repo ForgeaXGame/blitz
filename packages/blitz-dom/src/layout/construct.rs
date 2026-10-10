@@ -904,11 +904,7 @@ fn create_checkbox_input(doc: &mut BaseDocument, input_element_id: NodeId) {
     let node = &mut doc.nodes[input_element_id];
 
     let element = &mut node.data.downcast_element_mut().unwrap();
-    if !matches!(element.special_data, SpecialElementData::CheckboxInput(_)) {
-        let checked = element.has_attr(local_name!("checked"));
-        element.special_data = SpecialElementData::CheckboxInput(checked);
-        element.set_checkbox_input_checked(checked);
-    }
+    element.ensure_checkbox_input();
 }
 
 /// Find and return the "layout_children" (inline boxes) for an inline layout
