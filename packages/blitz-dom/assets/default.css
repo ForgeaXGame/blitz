@@ -99,6 +99,7 @@ button,
 input[type="submit"],
 input[type="reset"],
 input[type="button"] {
+    box-sizing: border-box;
     border: 1px solid #999;
     border-radius: 1px;
     padding: 1px 6px;

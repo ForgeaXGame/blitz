@@ -35,7 +35,7 @@ impl BaseDocument {
 
     /// Add a node to the id-to-node map
     pub(crate) fn add_to_id_map(&mut self, id: &str, node_id: NodeId) {
-        if id.is_empty() {
+        if id.is_empty() || self.nodes[node_id].containing_shadow_id().is_some() {
             return;
         }
         let node_ids = self.nodes_to_id.entry(id.to_string()).or_default();

@@ -140,6 +140,11 @@ impl<'m, 'doc> DocumentHtmlParser<'m, 'doc> {
         element_id: NodeId,
         html: &str,
     ) {
+        let context_id = mutr
+            .doc
+            .get_node(element_id)
+            .and_then(|node| node.shadow_host_id())
+            .unwrap_or(element_id);
         let sink = DocumentHtmlParser::new(mutr);
 
         let opts = ParseOpts {
@@ -152,7 +157,7 @@ impl<'m, 'doc> DocumentHtmlParser<'m, 'doc> {
                 quirks_mode: QuirksMode::NoQuirks,
             },
         };
-        html5ever::driver::parse_fragment_for_element(sink, opts, element_id, false, None)
+        html5ever::driver::parse_fragment_for_element(sink, opts, context_id, false, None)
             .from_utf8()
             .read_from(&mut html.as_bytes())
             .unwrap();

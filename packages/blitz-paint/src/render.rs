@@ -612,7 +612,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                 // (they should always be rendered as part of an inline layout)
                 // unreachable!()
             }
-            NodeData::Document(_) => {}
+            NodeData::Document(_) | NodeData::DocumentFragment(_) => {}
             // NodeData::Doctype => {}
             NodeData::Comment { .. } => {} // NodeData::ProcessingInstruction { .. } => {}
         }

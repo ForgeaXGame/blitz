@@ -60,6 +60,7 @@ mod resolved_style;
 mod scrolling;
 mod selection;
 /// Implementations that interact with servo's style engine
+mod shadow;
 mod stylo;
 mod stylo_device;
 mod stylo_to_cursor_icon;

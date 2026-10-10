@@ -87,7 +87,7 @@ fn node_type(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<J
     let doc = ctx.doc.borrow();
     let node_type = match doc.get_node(node_id).map(|node| &node.data) {
         Some(NodeData::Document(_)) => 9,
-        Some(NodeData::Element(_)) if is_fragment(&doc, node_id) => 11,
+        Some(NodeData::DocumentFragment(_)) => 11,
         Some(NodeData::Element(_)) | Some(NodeData::AnonymousBlock(_)) => 1,
         Some(NodeData::Text(_)) => 3,
         Some(NodeData::Comment { .. }) => 8,
@@ -102,8 +102,7 @@ fn node_name(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<J
     let doc = ctx.doc.borrow();
     let name = match doc.get_node(node_id).map(|node| &node.data) {
         Some(NodeData::Document(_)) => "#document".to_string(),
-        // Fragments' special `#document-fragment` name is not uppercased
-        Some(NodeData::Element(data)) if is_fragment(&doc, node_id) => data.name.local.to_string(),
+        Some(NodeData::DocumentFragment(_)) => "#document-fragment".to_string(),
         Some(NodeData::Element(data)) | Some(NodeData::AnonymousBlock(data)) => {
             data.name.local.to_uppercase()
         }
@@ -409,11 +408,10 @@ fn remove(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsVa
 
 /// Is the node a DocumentFragment (e.g. a `<template>`'s contents, or created
 /// with `document.createDocumentFragment()`)? Fragments are represented as
-/// detached elements with the special name `#document-fragment`.
+/// actual DocumentFragment nodes owned by the core.
 pub(crate) fn is_fragment(doc: &blitz_dom::BaseDocument, node_id: NodeId) -> bool {
     doc.get_node(node_id)
-        .and_then(|node| node.element_data())
-        .is_some_and(|element| &*element.name.local == "#document-fragment")
+        .is_some_and(|node| matches!(node.data, NodeData::DocumentFragment(_)))
 }
 
 /// Resolve a node argument for insertion, per the DOM spec's "insert a node"

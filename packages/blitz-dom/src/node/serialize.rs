@@ -125,7 +125,7 @@ impl Node {
             .map(|color| color.to_css_string());
 
         match &self.data {
-            NodeData::Document(_) => {}
+            NodeData::Document(_) | NodeData::DocumentFragment(_) => {}
             NodeData::Comment { .. } => {}
             NodeData::AnonymousBlock(_) => {}
             // NodeData::Doctype { name, .. } => write!(s, "DOCTYPE {name}"),

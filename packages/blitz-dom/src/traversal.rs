@@ -5,28 +5,28 @@ use style::dom::TNode as _;
 
 use crate::{BaseDocument, Node};
 
+// Move the actual flattened child storage across mutation without allocating
+// another per-node snapshot on the ordinary light-DOM layout path.
 macro_rules! iter_children {
-    ($node_expr:expr, $cb:expr) => {{
-        let node = &mut $node_expr;
-        let children = core::mem::take(&mut node.children);
+    ($tree:expr, $id:expr, $cb:expr) => {{
+        let id = $id;
+        let owner = $tree[id].shadow_root_id().unwrap_or(id);
+        let children = core::mem::take(&mut $tree[owner].children);
         for child_id in children.iter().copied() {
             $cb(child_id)
         }
-        $node_expr.children = children;
+        $tree[owner].children = children;
     }};
 }
 pub(crate) use iter_children;
 
 macro_rules! iter_children_and_pseudos {
-    ($node_expr:expr, $cb:expr) => {{
-        // Load node
-        let node = &mut $node_expr;
-
-        // Copy before, after, and take children
-        let before = node.before();
-        let after = node.after();
-        let children = core::mem::take(&mut node.children);
-
+    ($tree:expr, $id:expr, $cb:expr) => {{
+        let id = $id;
+        let before = $tree[id].before();
+        let after = $tree[id].after();
+        let owner = $tree[id].shadow_root_id().unwrap_or(id);
+        let children = core::mem::take(&mut $tree[owner].children);
         if let Some(before) = before {
             $cb(before)
         }
@@ -36,9 +36,7 @@ macro_rules! iter_children_and_pseudos {
         if let Some(after) = after {
             $cb(after)
         }
-
-        // Reload node and put children back
-        $node_expr.children = children;
+        $tree[owner].children = children;
     }};
 }
 pub(crate) use iter_children_and_pseudos;
@@ -167,6 +165,10 @@ impl BaseDocument {
                 iter_subtree_mut_inner(doc, child_id, cb);
             }
             doc.nodes[node_id].children = children;
+            if let Some(shadow) = doc.nodes[node_id].shadow_root_id() {
+                cb(shadow, doc);
+                iter_subtree_mut_inner(doc, shadow, cb);
+            }
         }
     }
 

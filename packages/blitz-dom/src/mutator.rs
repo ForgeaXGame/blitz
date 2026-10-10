@@ -169,12 +169,7 @@ impl DocumentMutator<'_> {
         if let Some(contents_id) = self.try_template_contents(template_id) {
             return contents_id;
         }
-        let name = QualName::new(
-            None,
-            markup5ever::ns!(html),
-            markup5ever::LocalName::from("#document-fragment"),
-        );
-        let contents_id = self.create_element(name, Vec::new());
+        let contents_id = self.create_document_fragment();
         if let Some(element) = self
             .doc
             .get_node_mut(template_id)
@@ -1141,6 +1136,7 @@ impl<'doc> DocumentMutator<'doc> {
     }
 
     fn unload_stylesheet(&mut self, node_id: NodeId) {
+        let in_shadow = self.doc.nodes[node_id].containing_shadow_id().is_some();
         let node = &mut self.doc.nodes[node_id];
         let Some(element) = node.element_data_mut() else {
             unreachable!();
@@ -1150,13 +1146,17 @@ impl<'doc> DocumentMutator<'doc> {
         };
 
         let guard = self.doc.guard.read();
-        self.doc.stylist.remove_stylesheet(stylesheet, &guard);
+        if !in_shadow {
+            self.doc.stylist.remove_stylesheet(stylesheet, &guard);
+        }
         self.doc
             .stylist
             .force_stylesheet_origins_dirty(OriginSet::all());
 
         self.doc.nodes_to_stylesheet.remove(&node_id);
         self.doc.stylesheet_generation += 1;
+        drop(guard);
+        self.doc.invalidate_shadow_styles();
     }
 
     fn load_image(&mut self, target_id: NodeId) {

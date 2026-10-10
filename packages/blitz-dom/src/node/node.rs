@@ -146,7 +146,7 @@ macro_rules! universal_accessors {
                 pub fn $field(&self) -> &$ty {
                     match &self.data {
                         NodeData::Element(data) | NodeData::AnonymousBlock(data) => &data.$field,
-                        NodeData::Document(data) => &data.$field,
+                        NodeData::Document(data) | NodeData::DocumentFragment(data) => &data.$field,
                         _ => panic!(concat!("`", stringify!($field), "` is not available on this node kind")),
                     }
                 }
@@ -156,7 +156,7 @@ macro_rules! universal_accessors {
                 pub fn $field_mut(&mut self) -> &mut $ty {
                     match &mut self.data {
                         NodeData::Element(data) | NodeData::AnonymousBlock(data) => &mut data.$field,
-                        NodeData::Document(data) => &mut data.$field,
+                        NodeData::Document(data) | NodeData::DocumentFragment(data) => &mut data.$field,
                         _ => panic!(concat!("`", stringify!($field), "` is not available on this node kind")),
                     }
                 }
@@ -189,7 +189,7 @@ impl Node {
     pub fn layout_data(&self) -> &LayoutData {
         match &self.data {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => data.layout_data(),
-            NodeData::Document(data) => data.layout_data(),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => data.layout_data(),
             _ => panic!("`layout_data` is not available on this node kind"),
         }
     }
@@ -203,7 +203,7 @@ impl Node {
     pub fn layout_data_mut(&mut self) -> &mut LayoutData {
         match &mut self.data {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => data.layout_data_mut(),
-            NodeData::Document(data) => data.layout_data_mut(),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => data.layout_data_mut(),
             _ => panic!("`layout_data` is not available on this node kind"),
         }
     }
@@ -217,7 +217,9 @@ impl Node {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => {
                 data.layout_data.as_deref_mut()
             }
-            NodeData::Document(data) => data.layout_data.as_deref_mut(),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => {
+                data.layout_data.as_deref_mut()
+            }
             _ => None,
         }
     }
@@ -302,7 +304,9 @@ impl Node {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => {
                 Some(&data.stylo_element_data)
             }
-            NodeData::Document(data) => Some(&data.stylo_element_data),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => {
+                Some(&data.stylo_element_data)
+            }
             _ => None,
         }
     }
@@ -313,7 +317,9 @@ impl Node {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => {
                 Some(&mut data.stylo_element_data)
             }
-            NodeData::Document(data) => Some(&mut data.stylo_element_data),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => {
+                Some(&mut data.stylo_element_data)
+            }
             _ => None,
         }
     }
@@ -326,7 +332,9 @@ impl Node {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => {
                 Some(&data.dirty_descendants)
             }
-            NodeData::Document(data) => Some(&data.dirty_descendants),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => {
+                Some(&data.dirty_descendants)
+            }
             _ => None,
         }
     }
@@ -339,7 +347,9 @@ impl Node {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => {
                 Some(&data.damaged_descendants)
             }
-            NodeData::Document(data) => Some(&data.damaged_descendants),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => {
+                Some(&data.damaged_descendants)
+            }
             _ => None,
         }
     }
@@ -350,7 +360,7 @@ impl Node {
     pub fn guard(&self) -> &SharedRwLock {
         let guard = match &self.data {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => data.guard.as_ref(),
-            NodeData::Document(data) => data.guard.as_ref(),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => data.guard.as_ref(),
             _ => None,
         };
         guard.expect("`guard` is not available on this node kind")
@@ -360,7 +370,7 @@ impl Node {
     pub fn has_snapshot(&self) -> bool {
         match &self.data {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => data.has_snapshot,
-            NodeData::Document(data) => data.has_snapshot,
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => data.has_snapshot,
             _ => false,
         }
     }
@@ -369,7 +379,9 @@ impl Node {
     pub fn set_has_snapshot(&mut self, value: bool) {
         match &mut self.data {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => data.has_snapshot = value,
-            NodeData::Document(data) => data.has_snapshot = value,
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => {
+                data.has_snapshot = value
+            }
             _ => {}
         }
     }
@@ -398,7 +410,7 @@ impl Node {
             NodeData::Element(data) | NodeData::AnonymousBlock(data) => {
                 data.guard = Some(guard);
             }
-            NodeData::Document(data) => data.guard = Some(guard),
+            NodeData::Document(data) | NodeData::DocumentFragment(data) => data.guard = Some(guard),
             _ => {}
         }
 
@@ -587,7 +599,7 @@ impl Node {
     /// This propagates the dirty flag up the tree so that the style traversal
     /// knows to visit the subtree containing this node.
     pub fn mark_ancestors_dirty(&self) {
-        let mut current_id = self.parent;
+        let mut current_id = self.flat_parent();
         while let Some(parent_id) = current_id {
             let parent = &self.tree()[parent_id];
             // If this ancestor already has dirty_descendants set, we can stop
@@ -597,7 +609,7 @@ impl Node {
                     break;
                 }
             }
-            current_id = parent.parent;
+            current_id = parent.flat_parent();
         }
     }
 
@@ -622,11 +634,11 @@ impl Node {
     /// its ancestors have `damaged_descendants` set.
     pub fn mark_damaged(&self) {
         if let Some(flag) = self.damaged_descendants_flag() {
-            if flag.swap(true, Ordering::Relaxed) {
+            if flag.swap(true, Ordering::Relaxed) && self.shadow_host_id().is_none() {
                 return;
             }
         }
-        let mut current_id = self.parent;
+        let mut current_id = self.flat_parent();
         while let Some(parent_id) = current_id {
             let parent = &self.tree()[parent_id];
             // If this ancestor already has damaged_descendants set, we can stop
@@ -636,7 +648,7 @@ impl Node {
                     break;
                 }
             }
-            current_id = parent.parent;
+            current_id = parent.flat_parent();
         }
     }
 
@@ -830,6 +842,7 @@ impl Node {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NodeKind {
     Document,
+    DocumentFragment,
     Element,
     AnonymousBlock,
     Text,
@@ -841,6 +854,9 @@ pub enum NodeKind {
 pub enum NodeData {
     /// The `Document` itself - the root node of a HTML document.
     Document(Box<DocumentData>),
+
+    /// A detached fragment, optionally attached to a shadow host.
+    DocumentFragment(Box<DocumentData>),
 
     /// An element with attributes.
     Element(Box<ElementData>),
@@ -904,6 +920,7 @@ impl NodeData {
     pub fn kind(&self) -> NodeKind {
         match self {
             NodeData::Document(_) => NodeKind::Document,
+            NodeData::DocumentFragment(_) => NodeKind::DocumentFragment,
             NodeData::Element(_) => NodeKind::Element,
             NodeData::AnonymousBlock(_) => NodeKind::AnonymousBlock,
             NodeData::Text(_) => NodeKind::Text,
@@ -1055,6 +1072,7 @@ impl Node {
 
         match &self.data {
             NodeData::Document(_) => write!(s, "DOCUMENT"),
+            NodeData::DocumentFragment(_) => write!(s, "DOCUMENT_FRAGMENT"),
             // NodeData::Doctype { name, .. } => write!(s, "DOCTYPE {name}"),
             NodeData::Text(data) => {
                 let bytes = data.content.as_bytes();

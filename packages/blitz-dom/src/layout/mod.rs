@@ -355,7 +355,7 @@ impl LayoutPassState<'_> {
                                 },
                             );
                         }
-                        None | Some("text" | "password" | "email" | "tel" | "url" | "search") => {
+                        _ if element_data.text_input_is_multiline() == Some(false) => {
                             return compute_leaf_layout(
                                 inputs,
                                 &node.layout_style(),
@@ -598,7 +598,9 @@ impl LayoutPassState<'_> {
                     Display::None => taffy::LayoutOutput::HIDDEN,
                 }
             }
-            NodeData::Document(_) => compute_block_layout(self, node_id, inputs, None),
+            NodeData::Document(_) | NodeData::DocumentFragment(_) => {
+                compute_block_layout(self, node_id, inputs, None)
+            }
 
             _ => taffy::LayoutOutput::HIDDEN,
         }
@@ -913,7 +915,7 @@ impl PrintTree for TaffyDebugTree<'_> {
         let node = &self.node_from_id(node_id);
 
         match node.data {
-            NodeData::Document(_) => "DOCUMENT",
+            NodeData::Document(_) | NodeData::DocumentFragment(_) => "DOCUMENT",
             // NodeData::Doctype { .. } => return "DOCTYPE",
             NodeData::Text { .. } => node.node_debug_str().leak(),
             NodeData::Comment { .. } => "COMMENT",

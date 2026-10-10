@@ -235,8 +235,7 @@ fn create_document_fragment(
     let _ = this_node_id(this)?;
     let node_id = {
         let mut doc = ctx.doc.borrow_mut();
-        doc.mutate()
-            .create_element(qual_name("#document-fragment"), Vec::new())
+        doc.mutate().create_document_fragment()
     };
     Ok(node_wrapper(&ctx, node_id, context).into())
 }

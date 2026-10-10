@@ -78,6 +78,8 @@ pub struct ElementData {
 
     /// The element's template contents (\<template\> elements only)
     pub template_contents: Option<NodeId>,
+    /// The element's attached shadow tree (outside its light-DOM children).
+    pub shadow_root: Option<NodeId>,
     // /// Whether the node is a [HTML integration point] (https://html.spec.whatwg.org/multipage/#html-integration-point)
     // pub mathml_annotation_xml_integration_point: bool,
 
@@ -197,6 +199,8 @@ impl DocumentData {
 /// carries the same style/layout fields that were previously stored directly on
 /// [`Node`](super::Node).
 pub struct DocumentData {
+    /// Present only on a DocumentFragment created by attach_shadow.
+    pub shadow: Option<crate::shadow::ShadowData>,
     pub stylo_element_data: StyloData,
     /// Selector flags deposited here by `apply_selector_flags` when a
     /// `for_parent()` flag is applied while matching the root `<html>` element,
@@ -238,6 +242,7 @@ impl std::fmt::Debug for DocumentData {
 impl DocumentData {
     pub fn new() -> Self {
         Self {
+            shadow: None,
             stylo_element_data: Default::default(),
             selector_flags: Cell::new(ElementSelectorFlags::empty()),
             guard: None,
@@ -309,6 +314,7 @@ impl Clone for ElementData {
             inline_layout_data: self.inline_layout_data.clone(),
             list_item_data: self.list_item_data.clone(),
             template_contents: self.template_contents,
+            shadow_root: None,
 
             // Runtime state: reset to defaults.
             stylo_element_data: Default::default(),
@@ -415,6 +421,7 @@ impl ElementData {
             list_item_data: None,
             special_data: SpecialElementData::None,
             template_contents: None,
+            shadow_root: None,
             background_images: ThinVec::new(),
             mask_images: ThinVec::new(),
 
@@ -982,11 +989,12 @@ pub use file_data::FileData;
 #[cfg(test)]
 mod tests {
     use super::TextInputData;
-    use parley::{FontContext, LayoutContext};
+    use parley::LayoutContext;
 
     /// Build a [`TextInputData`] with the given text laid out at scale 1.0.
     fn make_input(is_multiline: bool, text: &str) -> TextInputData {
-        let mut font_ctx = FontContext::new();
+        let mut font_ctx =
+            crate::build_single_font_ctx(include_bytes!("../../tests/fonts/dejavu-sans-ascii.ttf"));
         let mut layout_ctx = LayoutContext::new();
         let mut data = TextInputData::new(is_multiline);
         data.editor.set_scale(1.0);
@@ -1014,7 +1022,12 @@ mod tests {
 
         // Caret at the end of a string that overflows a narrow input should scroll right.
         data.editor
-            .driver(&mut FontContext::new(), &mut LayoutContext::new())
+            .driver(
+                &mut crate::build_single_font_ctx(include_bytes!(
+                    "../../tests/fonts/dejavu-sans-ascii.ttf"
+                )),
+                &mut LayoutContext::new(),
+            )
             .move_to_text_end();
         data.clamp_scroll_offset(content_box_width, content_box_height);
 
@@ -1032,7 +1045,12 @@ mod tests {
 
         // Moving the caret back to the start should reset the scroll offset.
         data.editor
-            .driver(&mut FontContext::new(), &mut LayoutContext::new())
+            .driver(
+                &mut crate::build_single_font_ctx(include_bytes!(
+                    "../../tests/fonts/dejavu-sans-ascii.ttf"
+                )),
+                &mut LayoutContext::new(),
+            )
             .move_to_text_start();
         data.clamp_scroll_offset(content_box_width, content_box_height);
         assert_eq!(data.scroll_offset, 0.0);
@@ -1048,14 +1066,24 @@ mod tests {
         // Constrain the width so wrapping is well-defined.
         data.editor.set_width(Some(200.0));
         data.editor
-            .driver(&mut FontContext::new(), &mut LayoutContext::new())
+            .driver(
+                &mut crate::build_single_font_ctx(include_bytes!(
+                    "../../tests/fonts/dejavu-sans-ascii.ttf"
+                )),
+                &mut LayoutContext::new(),
+            )
             .refresh_layout();
 
         let content_box_width = 200.0;
         let content_box_height = 30.0;
 
         data.editor
-            .driver(&mut FontContext::new(), &mut LayoutContext::new())
+            .driver(
+                &mut crate::build_single_font_ctx(include_bytes!(
+                    "../../tests/fonts/dejavu-sans-ascii.ttf"
+                )),
+                &mut LayoutContext::new(),
+            )
             .move_to_text_end();
         data.clamp_scroll_offset(content_box_width, content_box_height);
 
@@ -1077,7 +1105,12 @@ mod tests {
         let mut data = make_input(true, &text);
         data.editor.set_width(Some(200.0));
         data.editor
-            .driver(&mut FontContext::new(), &mut LayoutContext::new())
+            .driver(
+                &mut crate::build_single_font_ctx(include_bytes!(
+                    "../../tests/fonts/dejavu-sans-ascii.ttf"
+                )),
+                &mut LayoutContext::new(),
+            )
             .refresh_layout();
 
         let content_box_width = 200.0;

@@ -966,6 +966,12 @@ impl BaseDocument {
                 self.drop_node_ignoring_parent_with(after, on_drop);
             }
 
+            if let Some(shadow) = node.shadow_root_id() {
+                self.drop_node_ignoring_parent_with(shadow, on_drop);
+            }
+            if let Some(contents) = node.element_data().and_then(|data| data.template_contents) {
+                self.drop_node_ignoring_parent_with(contents, on_drop);
+            }
             for &child in &node.children {
                 self.drop_node_ignoring_parent_with(child, on_drop);
             }
@@ -1187,7 +1193,9 @@ impl BaseDocument {
         self.stylesheet_generation += 1;
 
         if let Some(old) = old {
-            self.stylist.remove_stylesheet(old, &self.guard.read())
+            if self.nodes[node_id].containing_shadow_id().is_none() {
+                self.stylist.remove_stylesheet(old, &self.guard.read());
+            }
         }
 
         // Fetch @font-face fonts
@@ -1206,11 +1214,16 @@ impl BaseDocument {
         let element = &mut self.nodes[node_id].element_data_mut().unwrap();
         element.special_data = SpecialElementData::Stylesheet(stylesheet.clone());
 
+        self.invalidate_shadow_styles();
+        if self.nodes[node_id].containing_shadow_id().is_some() {
+            return;
+        }
+
         // TODO: Nodes could potentially get reused so ordering by node_id might be wrong.
         let insertion_point = self
             .nodes_to_stylesheet
             .range((Bound::Excluded(node_id), Bound::Unbounded))
-            .next()
+            .find(|(id, _)| self.nodes[**id].containing_shadow_id().is_none())
             .map(|(_, sheet)| sheet);
 
         if let Some(insertion_point) = insertion_point {
@@ -2083,6 +2096,7 @@ impl BaseDocument {
 
     /// Update the device and reset the stylist to process the new size
     pub fn set_stylist_device(&mut self, device: Device) {
+        self.invalidate_shadow_styles();
         // Seed the new device with the root element's current style and font-relative
         // unit state (used to resolve rem/rlh/rex/rch/rcap/ric units). Stylo only
         // updates this state when the root element's style *changes* during a restyle,
@@ -2966,11 +2980,13 @@ mod hover_invalidation_tests {
         };
 
         let mut mutator = doc.mutate();
-        let html = mutator.create_element(qual_name!("html"), vec![]);
-        let body = mutator.create_element(qual_name!("body"), vec![style("margin:0")]);
-        let div =
-            mutator.create_element(qual_name!("div"), vec![style("width:300px;height:100px")]);
-        let span = mutator.create_element(qual_name!("span"), vec![]);
+        let html = mutator.create_element(qual_name!("html", html), vec![]);
+        let body = mutator.create_element(qual_name!("body", html), vec![style("margin:0")]);
+        let div = mutator.create_element(
+            qual_name!("div", html),
+            vec![style("width:300px;height:100px")],
+        );
+        let span = mutator.create_element(qual_name!("span", html), vec![]);
         let text = mutator.create_text_node("some text");
         mutator.append_children(span, &[text]);
         mutator.append_children(div, &[span]);

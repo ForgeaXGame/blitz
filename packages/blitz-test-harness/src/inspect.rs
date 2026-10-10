@@ -151,6 +151,7 @@ fn write_node(out: &mut String, doc: &blitz_dom::BaseDocument, node: &Node, dept
 
     match &node.data {
         NodeData::Document(_) => writeln!(out, "#document").unwrap(),
+        NodeData::DocumentFragment(_) => writeln!(out, "#document-fragment").unwrap(),
         NodeData::AnonymousBlock(_) => writeln!(out, "#anonymous{geometry}").unwrap(),
         NodeData::Text(data) => {
             let content = data.content.trim();

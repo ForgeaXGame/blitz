@@ -61,6 +61,7 @@ use style::values::computed::text::TextAlign as StyloTextAlign;
 
 impl crate::document::BaseDocument {
     pub fn resolve_stylist(&mut self, now: f64) {
+        self.rebuild_shadow_styles();
         style::thread_state::enter(ThreadState::LAYOUT);
 
         let guard = &self.guard;
@@ -273,14 +274,14 @@ impl<'a> TShadowRoot for BlitzNode<'a> {
     }
 
     fn host(&self) -> <Self::ConcreteNode as TNode>::ConcreteElement {
-        todo!("Shadow roots not implemented")
+        self.with(self.shadow_host_id().expect("expected a shadow root"))
     }
 
     fn style_data<'b>(&self) -> Option<&'b style::stylist::CascadeData>
     where
         Self: 'b,
     {
-        todo!("Shadow roots not implemented")
+        self.shadow_cascade()
     }
 }
 
@@ -313,7 +314,7 @@ impl<'a> TNode for BlitzNode<'a> {
     fn owner_doc(&self) -> Self::ConcreteDocument {
         // Walk up the (layout-)parent chain to the root Document node.
         let mut node = *self;
-        while let Some(parent_id) = node.parent {
+        while let Some(parent_id) = node.flat_parent() {
             node = node.with(parent_id);
         }
         node
@@ -328,7 +329,7 @@ impl<'a> TNode for BlitzNode<'a> {
     //
     // For the sake of this demo, we're just going to return the parent node ann
     fn traversal_parent(&self) -> Option<Self::ConcreteElement> {
-        self.parent_node().and_then(|node| node.as_element())
+        self.flat_parent().and_then(|id| self.with(id).as_element())
     }
 
     fn opaque(&self) -> OpaqueNode {
@@ -354,8 +355,7 @@ impl<'a> TNode for BlitzNode<'a> {
     }
 
     fn as_shadow_root(&self) -> Option<Self::ConcreteShadowRoot> {
-        // TODO: implement shadow DOM
-        None
+        self.shadow_host_id().map(|_| *self)
     }
 }
 
@@ -376,15 +376,17 @@ impl selectors::Element for BlitzNode<'_> {
     }
 
     fn parent_element(&self) -> Option<Self> {
-        TElement::traversal_parent(self)
+        self.parent_node().and_then(|node| node.as_element())
     }
 
     fn parent_node_is_shadow_root(&self) -> bool {
-        false
+        self.parent
+            .is_some_and(|id| self.with(id).shadow_host_id().is_some())
     }
 
     fn containing_shadow_host(&self) -> Option<Self> {
-        None
+        let shadow = self.with(self.containing_shadow_id()?);
+        Some(self.with(shadow.shadow_host_id()?))
     }
 
     fn is_pseudo_element(&self) -> bool {
@@ -630,11 +632,8 @@ impl<'a> TElement for BlitzNode<'a> {
         _opaque_host: OpaqueElement,
         _sheet_index: usize,
     ) -> Option<ImplicitScopeRoot> {
-        // We cannot currently implement this as we are using the NodeId as the OpaqueElement,
-        // and need a reference to the Slab to convert it back into an Element
-        //
-        // Luckily it is only needed for shadow dom.
-        todo!();
+        // Implicit @scope is outside the supported shadow stylesheet subset.
+        None
     }
 
     fn traversal_children(&self) -> style::dom::LayoutIterator<Self::TraversalChildrenIterator> {
@@ -823,11 +822,17 @@ impl<'a> TElement for BlitzNode<'a> {
     }
 
     fn shadow_root(&self) -> Option<<Self::ConcreteNode as TNode>::ConcreteShadowRoot> {
-        None
+        self.shadow_root_id().map(|id| self.with(id))
+    }
+
+    fn inheritance_parent(&self) -> Option<Self> {
+        // CSS inheritance follows the flattened tree, while selector combinators
+        // continue to observe DOM parent_element and stop at the shadow boundary.
+        self.flat_parent().and_then(|id| self.with(id).as_element())
     }
 
     fn containing_shadow(&self) -> Option<<Self::ConcreteNode as TNode>::ConcreteShadowRoot> {
-        None
+        self.containing_shadow_id().map(|id| self.with(id))
     }
 
     fn get_attr(&self, attr: &style::LocalName, ns: &style::Namespace) -> Option<String> {
@@ -1277,7 +1282,7 @@ impl<'a> Iterator for Traverser<'a> {
     type Item = BlitzNode<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let node_id = self.parent.children.get(self.child_index)?;
+        let node_id = self.parent.flat_children().get(self.child_index)?;
         let node = self.parent.with(*node_id);
 
         self.child_index += 1;

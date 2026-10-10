@@ -8,6 +8,8 @@ fixes the resolved headless dependency graph. Upstream licenses remain unchanged
 | --- | --- |
 | `innerHTML` detaches old children without destroying referenced node identities | `mutator::test::inner_html_keeps_detached_node_references_live` |
 | Input current values exist before layout, retain the standard dirty-value distinction, and survive cloning | `mutator::test::input_value_precedes_layout_and_survives_default_attribute_changes` |
+| Open ShadowRoot uses native Stylo cascades, flattened inheritance/layout and scoped DOM queries; fragments retain real node identity | `shadow::tests::shadow_scope_mutation_detachment_and_drop_keep_one_tree`; Engine real-WASM/browser tests cover retargeting, inherited pixels and control hits |
+| Number controls reserve the same intrinsic text height as other single-line editors; buttons use border-box dimensions | Engine UI core glyph/height and browser rectangle regressions |
 
 `BaseDocument::input_value` and `set_input_value` share the same Parley editor used
 for layout and editing. Layout no longer creates a second value authority. Native
@@ -19,8 +21,9 @@ Engine's binding runs sequential style resolution with default features disabled
 and exercises dynamic Grid, input, retained nodes and owned RGBA through the real
 WASM module. It does not use a second JavaScript engine.
 
-The headless `blitz-dom` test run at this base has two existing failures:
-`hover_styles_apply_and_clear` and `scroll_by_clamps_and_bubbles`. Both were
-reproduced on unmodified upstream under the same resolved features. They remain
-failures; they are not evidence of hover or font-layout acceptance. Engine's
-specific consumer regressions and browser differential tests are separate gates.
+The upstream headless test prerequisites needed two repairs: the hover fixture
+created elements in the empty namespace instead of HTML, and scrolling tests
+laid out text without any available font. They now use the HTML namespace and a
+licensed prepared [test font](packages/blitz-dom/tests/fonts/README.md). The same
+original hover, scroll-clamp and bubbling assertions pass without system fonts.
+Engine's consumer regressions and browser differential tests remain separate gates.

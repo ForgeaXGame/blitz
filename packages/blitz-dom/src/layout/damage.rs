@@ -73,7 +73,8 @@ impl BaseDocument {
         }
 
         let mut damage_from_children = RestyleDamage::empty();
-        let children = std::mem::take(&mut self.nodes[node_id].children);
+        let child_owner = self.nodes[node_id].shadow_root_id().unwrap_or(node_id);
+        let children = std::mem::take(&mut self.nodes[child_owner].children);
         for child in children.iter() {
             damage_from_children |= self.propagate_damage_flags(*child);
         }
@@ -98,10 +99,8 @@ impl BaseDocument {
         damage_from_children.remove(REORDER_CHILDREN);
         damage |= damage_from_children;
 
+        self.nodes[child_owner].children = children;
         let node = &mut self.nodes[node_id];
-
-        // Put children back
-        node.children = children;
 
         if damage.contains(CONSTRUCT_BOX) {
             damage.insert(RestyleDamage::RELAYOUT);
@@ -212,8 +211,9 @@ impl BaseDocument {
             return;
         }
         let anonymous_blocks = std::mem::take(&mut node.anonymous_blocks);
-        let children = std::mem::take(&mut node.children);
+        let child_owner = node.shadow_root_id().unwrap_or(node_id);
         let (before, after) = (node.before(), node.after());
+        let children = std::mem::take(&mut self.nodes[child_owner].children);
 
         for anon_id in anonymous_blocks.iter() {
             self.clear_damage_and_dirty_flags(*anon_id);
@@ -230,9 +230,10 @@ impl BaseDocument {
             self.clear_damage_and_dirty_flags(after_id);
         }
 
+        self.nodes[child_owner].children = children;
         let node = &mut self.nodes[node_id];
         node.anonymous_blocks = anonymous_blocks;
-        node.children = children;
+
         node.clear_damage_mut();
         node.unset_damaged_descendants();
         node.unset_dirty_descendants();
