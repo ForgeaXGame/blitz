@@ -135,14 +135,15 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
 }
 
 /// As above, with an optional CSS family alias. Later `@font-face` subsets
-/// registered under that alias extend the same generic fallback family.
+/// registered under that alias extend the same generic and script fallback family.
 /// Invalid nonempty input is a construction error, not silent missing text.
 pub fn build_single_font_ctx_with_family(
     font_data: &[u8],
     family_name: Option<&str>,
 ) -> Result<FontContext, String> {
     use parley::fontique::{
-        Blob, Collection, CollectionOptions, FontInfoOverride, GenericFamily, SourceCache,
+        Blob, Collection, CollectionOptions, FontInfoOverride, GenericFamily, Script, ScriptExt,
+        SourceCache,
     };
     use std::sync::Arc;
 
@@ -173,6 +174,18 @@ pub fn build_single_font_ctx_with_family(
     ] {
         ctx.collection
             .append_generic_families(generic, family_ids.iter().copied());
+    }
+    // Generic families are only queried when CSS names them. Fontique's
+    // script fallbacks also cover missing glyphs in a named author family.
+    // This host-supplied family is the portable substitute for OS fallback;
+    // later subsets retain its identity and actual glyph coverage decides.
+    for script in [*b"Zyyy", *b"Zinh", *b"Zzzz"]
+        .into_iter()
+        .map(Script::from_bytes)
+        .chain(Script::all_samples().iter().map(|(script, _)| *script))
+    {
+        ctx.collection
+            .append_fallbacks(script, family_ids.iter().copied());
     }
     Ok(ctx)
 }
