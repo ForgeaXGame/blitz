@@ -368,7 +368,7 @@ impl BaseDocument {
 
         let id = ID_GENERATOR.fetch_add(1, Ordering::SeqCst);
 
-        let font_ctx = config
+        let mut font_ctx = config
             .font_ctx
             .map(|mut font_ctx| {
                 font_ctx.source_cache.make_shared();
@@ -377,7 +377,7 @@ impl BaseDocument {
             })
             .unwrap_or_else(|| {
                 use parley::fontique::{Collection, CollectionOptions, SourceCache};
-                let mut font_ctx = FontContext {
+                FontContext {
                     source_cache: SourceCache::new_shared(),
                     collection: Collection::new(CollectionOptions {
                         shared: false,
@@ -386,12 +386,13 @@ impl BaseDocument {
                             not(target_arch = "wasm32")
                         )),
                     }),
-                };
-                font_ctx
-                    .collection
-                    .register_fonts(Blob::new(Arc::new(crate::BULLET_FONT) as _), None);
-                font_ctx
+                }
             });
+        // Generated list/disclosure markers belong to the document, including
+        // when a host supplies a prepared font context with no system fonts.
+        font_ctx
+            .collection
+            .register_fonts(Blob::new(Arc::new(crate::BULLET_FONT) as _), None);
         let font_ctx = Arc::new(Mutex::new(font_ctx));
 
         // Make sure we turn on stylo features *before* creating the Stylist
@@ -3525,6 +3526,19 @@ mod hover_invalidation_tests {
 mod font_face_override_tests {
     use super::*;
     use crate::net::{FontFaceOverrides, Resource, ResourceLoadResponse};
+
+    #[test]
+    fn supplied_font_context_retains_builtin_marker_font() {
+        let font_ctx =
+            crate::build_single_font_ctx(include_bytes!("../tests/fonts/dejavu-sans-ascii.ttf"));
+        let document = BaseDocument::new(DocumentConfig {
+            font_ctx: Some(font_ctx),
+            ..Default::default()
+        });
+        let mut font_ctx = document.font_ctx.lock().unwrap();
+        assert!(font_ctx.collection.family_id("Bullet").is_some());
+        assert!(font_ctx.collection.family_id("DejaVu Sans").is_some());
+    }
 
     /// Regression-pin for the `@font-face` descriptor-honouring fix.
     ///
