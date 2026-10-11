@@ -123,6 +123,34 @@ fn ease_in_out_cubic(t: f64) -> f64 {
 }
 
 impl BaseDocument {
+    /// Layout changes can shrink an existing scroll range without a scroll
+    /// request. Reconcile only moved, visible scrollers through the same range
+    /// policy as programmatic scrolling before geometry and paint consume them.
+    pub(crate) fn clamp_scroll_offsets_after_layout(&mut self) {
+        let targets: Vec<_> = self
+            .nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.is_element() && *node.scroll_offset() != Point::ZERO && node.has_boxes()
+            })
+            .map(|(id, _)| ScrollTarget::Node(id))
+            .chain((self.viewport_scroll() != Point::ZERO).then_some(ScrollTarget::Viewport))
+            .collect();
+        for target in targets {
+            self.scroll(
+                ScrollRequest {
+                    target,
+                    amount: ScrollAmount::By(Point::ZERO),
+                    overflow: ScrollOverflow::Clamp,
+                    source: ScrollSource::Programmatic,
+                    behavior: ScrollBehavior::Instant,
+                    interrupt_animation: false,
+                },
+                &mut |_| {},
+            );
+        }
+    }
+
     /// Apply a scroll to the document, returning whether anything moved.
     ///
     /// This is the single scrolling primitive: user-initiated scrolls

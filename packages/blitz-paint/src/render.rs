@@ -243,6 +243,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         );
 
         self.draw_select_popups(scene);
+        self.draw_validation_message(scene);
 
         // Render debug overlay
         if self.dom.devtools().highlight_hover {
