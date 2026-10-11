@@ -18,6 +18,7 @@ fixes the resolved headless dependency graph. Upstream licenses remain unchanged
 | CSSOM client rectangles include the resolved node/ancestor transforms used by painting and hit testing; offset geometry stays untransformed | Engine `transformed_range_client_rects_hit_the_same_painted_control` |
 | Single select values and dirty option defaults stay on native nodes; layout and the viewport popup share one option projection and pointer rectangle | Engine `select_defaults_values_and_native_popup_commit_share_option_state`; Chromium differential settings consumer |
 | Checkbox/radio accent is independent of inherited text color; checkbox tick geometry includes its painted frame origin | Engine `white_label_checkbox_keeps_checked_fill_and_tick_visible_at_its_position` |
+| `display:none` cancels CSS animation sets in the flattened subtree after style resolution; hidden loading spinners stop requesting raster work, and showing the same nodes restarts their animations | Engine `hidden_loading_subtree_cancels_ticks_and_showing_restarts_animation` and the matching generated-WASM DOM regression |
 
 `BaseDocument::input_value` and `set_input_value` share the same Parley editor used
 for layout and editing. Layout no longer creates a second value authority. Native

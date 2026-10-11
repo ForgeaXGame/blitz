@@ -176,7 +176,27 @@ impl crate::document::BaseDocument {
                 transition.is_new = false;
             }
         }
-        sets.retain(|_, state| !state.is_empty());
+        sets.retain(|key, state| {
+            if state.is_empty() {
+                return false;
+            }
+            // display:none cancels animations throughout its flattened subtree.
+            // The style traversal skips those descendants, so they cannot cancel
+            // their own sets. Check the newly resolved ancestors before deciding
+            // whether another animation tick is needed; showing the subtree lets
+            // Stylo start its authored animations again.
+            let mut current = self.nodes.get(NodeId::from_u64(key.node.id() as u64));
+            while let Some(node) = current {
+                if node
+                    .display_style()
+                    .is_some_and(|display| display.is_none())
+                {
+                    return false;
+                }
+                current = node.flat_parent().and_then(|id| self.nodes.get(id));
+            }
+            true
+        });
         self.has_active_animations = sets.values().any(|state| state.needs_animation_ticks());
 
         // Maybe run garbage collection. Stylo has internal to determine whether to run or not.
