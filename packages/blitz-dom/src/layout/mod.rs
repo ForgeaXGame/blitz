@@ -383,8 +383,8 @@ impl LayoutPassState<'_> {
                                 inputs,
                                 &node.layout_style(),
                                 resolve_calc_value,
-                                |_known_size, _available_space| taffy::Size {
-                                    width: match inputs.available_space.width {
+                                |_known_size, available_space| taffy::Size {
+                                    width: match available_space.width {
                                         AvailableSpace::Definite(limit) => limit.min(300.0),
                                         AvailableSpace::MinContent => 0.0,
                                         AvailableSpace::MaxContent => 300.0,
