@@ -115,6 +115,7 @@ impl BaseDocument {
 
         // Resolve transforms
         self.resolve_transforms(root_node_id);
+        self.prepare_validation_message();
         timer.record_time("transform");
 
         // Build paint children / stacking contexts for damaged subtrees. Runs
@@ -457,6 +458,8 @@ impl BaseDocument {
         state.physicalise_and_round_layout(root_element_id);
         #[cfg(not(feature = "writing-mode"))]
         taffy::round_layout(&mut state, root_element_id);
+
+        self.clamp_scroll_offsets_after_layout();
 
         // println!("\n\n");
         // taffy::print_tree(self, root_node_id)

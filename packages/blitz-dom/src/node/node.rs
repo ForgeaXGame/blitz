@@ -1868,14 +1868,29 @@ impl Node {
     /// list for boxless nodes, such as `display: none`, `display: contents`, or
     /// detached elements)
     pub fn has_boxes(&self) -> bool {
-        self.flags.is_in_document()
-            && !self.display_style().is_some_and(|display| {
-                matches!(
-                    display.inside(),
-                    style::values::specified::box_::DisplayInside::None
-                        | style::values::specified::box_::DisplayInside::Contents
-                )
+        use style::values::specified::box_::DisplayInside;
+        if !self.flags.is_in_document()
+            || self.display_style().is_some_and(|display| {
+                matches!(display.inside(), DisplayInside::None | DisplayInside::Contents)
             })
+        {
+            return false;
+        }
+        // Hidden subtrees retain their last layout for incremental restoration,
+        // but none of those cached boxes participate in CSSOM geometry. A
+        // display:contents ancestor, unlike display:none, keeps child boxes.
+        let mut current = self.flat_parent();
+        while let Some(id) = current {
+            let parent = &self.tree()[id];
+            if parent
+                .display_style()
+                .is_some_and(|display| display.inside() == DisplayInside::None)
+            {
+                return false;
+            }
+            current = parent.flat_parent();
+        }
+        true
     }
 
     /// Creates a synthetic click event

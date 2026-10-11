@@ -59,6 +59,7 @@ mod resolved_style;
 /// Scrolling of nodes and the viewport, and scroll animations.
 mod scrolling;
 mod selection;
+mod validation;
 /// Implementations that interact with servo's style engine
 mod shadow;
 mod stylo;

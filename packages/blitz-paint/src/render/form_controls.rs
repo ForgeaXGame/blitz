@@ -132,6 +132,42 @@ impl ElementCx<'_, '_> {
 }
 
 impl super::BlitzDomPainter<'_, '_> {
+    pub(super) fn draw_validation_message(&self, scene: &mut impl PaintScene) {
+        let Some((rect, layout)) = self.dom.validation_message_popup() else {
+            return;
+        };
+        let transform = Affine::translate((
+            self.initial_x + rect[0] * self.scale,
+            self.initial_y + rect[1] * self.scale,
+        ));
+        let bounds = RoundedRect::from_rect(
+            kurbo::Rect::new(0.0, 0.0, rect[2] * self.scale, rect[3] * self.scale),
+            4.0 * self.scale,
+        );
+        scene.fill(Fill::NonZero, transform, Color::WHITE, None, &bounds);
+        scene.stroke(&Stroke::new(self.scale), transform, Color::BLACK, None, &bounds);
+        scene.push_clip_layer(Fill::NonZero, transform, &bounds);
+        let text_transform = transform * Affine::translate((8.0 * self.scale, 8.0 * self.scale));
+        for line in layout.lines() {
+            for item in line.items() {
+                let parley::PositionedLayoutItem::GlyphRun(glyphs) = item else {
+                    continue;
+                };
+                let run = glyphs.run();
+                scene.draw_glyphs(
+                    run.font(), run.font_size(), true,
+                    bytemuck::cast_slice(run.normalized_coords()), Vec2::ZERO,
+                    Fill::NonZero, &anyrender::Paint::from(Color::BLACK), 1.0,
+                    text_transform, None,
+                    glyphs.positioned_glyphs().map(|glyph| anyrender::Glyph {
+                        id: glyph.id as _, x: glyph.x, y: glyph.y,
+                    }),
+                );
+            }
+        }
+        scene.pop_layer();
+    }
+
     pub(super) fn draw_select_popups(&self, scene: &mut impl PaintScene) {
         for (id, node) in self.dom.tree().iter() {
             let Some(rect) = self.dom.select_popup_rect(id) else {

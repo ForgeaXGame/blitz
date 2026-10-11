@@ -262,6 +262,7 @@ pub struct BaseDocument {
     pub(crate) last_client_pointer_position: Option<taffy::Point<f32>>,
     /// The node which is currently focussed (if any)
     pub(crate) focus_node_id: Option<NodeId>,
+    pub(crate) validation_message: Option<crate::validation::ValidationMessage>,
     /// The node which is currently active (if any)
     pub(crate) active_node_id: Option<NodeId>,
     /// The node which recieved a mousedown event (if any)
@@ -470,6 +471,7 @@ impl BaseDocument {
             hover_node_is_text: false,
             last_client_pointer_position: None,
             focus_node_id: None,
+            validation_message: None,
             active_node_id: None,
             mousedown_node_id: None,
             has_active_animations: false,
@@ -1764,6 +1766,7 @@ impl BaseDocument {
 
     /// Clear the focussed node
     pub fn clear_focus(&mut self) {
+        self.dismiss_validation_message();
         if let Some(id) = self.focus_node_id {
             let shell_provider = self.shell_provider.clone();
             self.snapshot_node_and(id, ElementState::FOCUS | ElementState::FOCUSRING, |node| {
@@ -1786,6 +1789,7 @@ impl BaseDocument {
         if Some(focus_node_id) == self.focus_node_id {
             return false;
         }
+        self.dismiss_validation_message();
 
         #[cfg(feature = "tracing")]
         tracing::info!("Focussed node {focus_node_id}");
@@ -2436,6 +2440,9 @@ impl BaseDocument {
 
     /// Computes the size and position of the `Node` relative to the viewport
     pub fn get_client_bounding_rect(&self, node_id: NodeId) -> Option<BoundingRect> {
+        if !self.get_node(node_id)?.has_boxes() {
+            return Some(BoundingRect::default());
+        }
         // Non-atomic inline elements have no layout box of their own: return
         // the union of their per-line-box fragment rects.
         if let Some(rects) = self.inline_fragment_rects(node_id) {
@@ -2444,7 +2451,6 @@ impl BaseDocument {
                 .reduce(BoundingRect::union);
         }
 
-        self.get_node(node_id)?;
         let (pos, layout) = self.physical_unrounded_geometry(node_id);
         let size = layout.size;
 
@@ -2506,6 +2512,9 @@ impl BaseDocument {
     /// their `offsetParent` is resolved from the containing inline root.
     pub fn offset_rect(&self, node_id: NodeId) -> Option<BoundingRect> {
         let node = self.get_node(node_id)?;
+        if !node.has_boxes() {
+            return Some(BoundingRect::default());
+        }
 
         // Nodes with their own layout box: use it directly
         let Some(rects) = self.inline_fragment_rects(node_id) else {
@@ -2562,6 +2571,9 @@ impl BaseDocument {
     /// return a single rect. Non-atomic inline elements (which are laid out as style
     /// spans within an inline root's text layout) return one rect per line box.
     pub fn node_client_rects(&self, node_id: NodeId) -> Vec<BoundingRect> {
+        if !self.get_node(node_id).is_some_and(|node| node.has_boxes()) {
+            return Vec::new();
+        }
         match self.inline_fragment_rects(node_id) {
             Some(rects) => rects
                 .map(|rect| self.transform_client_rect(node_id, rect))
@@ -2707,6 +2719,7 @@ impl BaseDocument {
 
     /// Set the current value, retaining a distinct default value attribute.
     pub fn set_input_value(&mut self, node_id: NodeId, value: &str) -> bool {
+        self.dismiss_validation_message();
         if self.set_select_value(node_id, value) {
             return true;
         }
@@ -2743,6 +2756,7 @@ impl BaseDocument {
 
     /// Accept a native editing draft without applying script value sanitization.
     pub fn set_input_text(&mut self, node_id: NodeId, value: &str) -> bool {
+        self.dismiss_validation_message();
         if !self.ensure_text_input(node_id) {
             return false;
         }
@@ -3085,7 +3099,7 @@ impl BaseDocument {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct BoundingRect {
     pub x: f64,
     pub y: f64,
