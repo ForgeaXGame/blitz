@@ -106,8 +106,7 @@ textarea {
     font-family: monospace;
 }
 
-input:focus,
-textarea:focus {
+:focus {
     outline: 2px solid #4D90FE;
 }
 
@@ -857,9 +856,9 @@ canvas {
     user-select: none;
 }
 
-iframe:focus-visible,
-body:focus-visible,
-html:focus-visible {
+iframe:focus,
+body:focus,
+html:focus {
     /* These elements historically don't show outlines when focused by default.
    * We could consider changing that if needed. */
     outline-style: none;
