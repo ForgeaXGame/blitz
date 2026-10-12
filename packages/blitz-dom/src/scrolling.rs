@@ -21,6 +21,9 @@ pub enum ScrollBehavior {
 pub enum ScrollLogicalPosition {
     Start,
     Center,
+    /// Focus reveal: center a hidden axis, align partial visibility to the
+    /// nearest edge, and retain a fully visible or covering target.
+    CenterIfNeeded,
     End,
     Nearest,
 }
@@ -625,8 +628,13 @@ impl BaseDocument {
             ScrollLogicalPosition::Start => target_start,
             ScrollLogicalPosition::Center => target_start - (viewport_size - target_size) / 2.0,
             ScrollLogicalPosition::End => target_end - viewport_size,
-            ScrollLogicalPosition::Nearest => {
+            ScrollLogicalPosition::Nearest | ScrollLogicalPosition::CenterIfNeeded => {
                 let viewport_end = current + viewport_size;
+                if position == ScrollLogicalPosition::CenterIfNeeded
+                    && (target_end <= current || target_start >= viewport_end)
+                {
+                    return target_start - (viewport_size - target_size) / 2.0;
+                }
                 if (target_start >= current && target_end <= viewport_end)
                     || (target_start <= current && target_end >= viewport_end)
                 {
