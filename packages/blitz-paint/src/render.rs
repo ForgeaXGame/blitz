@@ -476,7 +476,6 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             None,
         );
 
-        cx.draw_outline(scene);
         cx.draw_outset_box_shadow(scene);
 
         // clip-path clip ayer
@@ -588,6 +587,10 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                 cx.maybe_pop_css_mask_layer(scene, mask_layer_pushed);
             },
         );
+
+        // Outlines paint over the element's border/content. Auto focus rings
+        // include an inner dark stroke, which the author background must not cover.
+        cx.draw_outline(scene);
 
         self.layer_manager
             .maybe_pop_layer(scene, css_clip_layer_pushed);
