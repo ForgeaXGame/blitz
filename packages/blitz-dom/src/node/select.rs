@@ -288,7 +288,10 @@ impl BaseDocument {
     pub(crate) fn prepare_select(&mut self, id: NodeId) {
         let options = self.select_options(id).unwrap();
         let style = self.nodes[id].primary_styles().unwrap();
-        let text_style = crate::stylo_to_parley::style(id, &style);
+        let mut text_style = crate::stylo_to_parley::style(id, &style);
+        // A native single-line select uses the font strut, independently of
+        // authored CSS line-height (as does Chromium).
+        text_style.line_height = parley::style::LineHeight::NORMAL;
         drop(style);
         let scale = self.viewport.scale();
         let mut choices = Vec::with_capacity(options.len());

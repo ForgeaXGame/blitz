@@ -6,6 +6,9 @@ fixes the resolved headless dependency graph. Upstream licenses remain unchanged
 
 | Repair | Regression |
 | --- | --- |
+| Native checkbox ticks, full-size radio rings and 8px range tracks follow measured Chromium geometry and colors; range painting retains the shared 16px layout/hit geometry | Engine native control pixel regressions and unchanged profile Chromium/CPU/WebGPU differential with captured-frame replay |
+| Native single-select intrinsic height uses the normal font strut independently of authored line-height; explicit height still wins | Engine native line-height matrix and same-font Chromium control geometry |
+| Cyclic percentage widths contribute against zero during form-control min-content measurement; auto controls retain their cols/size intrinsic widths | Engine input/textarea Grid regression and unchanged profile equal-column Chromium comparison |
 | Disabled text/number fields, textarea, select and buttons receive a neutral native background; author backgrounds still override UA state styling and native track/marker controls retain their own paint | Engine disabled-control native pixel/state/author-style regression and shared profile WebGPU capture; disabled-control Chromium/WASM behavior differential |
 | Checkbox/radio auto dimensions use native intrinsic 13px measurement; authored dimensions remain independent, and UA CSS no longer duplicates the intrinsic size | Engine `checkable_auto_dimensions_retain_native_intrinsic_size`; shared profile form Chromium/Blitz GPU geometry, pixels and captured-frame replay |
 | An accepted form reset restores current native text/range/checkable/select defaults and clears dirty state through existing form ownership, including externally associated and disabled controls | Engine `reset_restores_form_owned_native_values_and_clean_default_state`; generated-WASM/Chromium reset-button pointer and keyboard differential covers cancellation, callback mutations and subsequent defaults |
