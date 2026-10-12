@@ -144,8 +144,7 @@ pub fn build_single_font_ctx_with_family(
     family_name: Option<&str>,
 ) -> Result<FontContext, String> {
     use parley::fontique::{
-        Blob, Collection, CollectionOptions, FontInfoOverride, GenericFamily, Script, ScriptExt,
-        SourceCache,
+        Blob, Collection, CollectionOptions, FontInfoOverride, GenericFamily, SourceCache,
     };
     use std::sync::Arc;
 
@@ -157,17 +156,17 @@ pub fn build_single_font_ctx_with_family(
         }),
     };
     let decoded = decode_font_bytes(font_data).into_owned();
-    let registered = ctx.collection.register_fonts(
+    let family_ids = register_font_with_fallback(
+        &mut ctx.collection,
         Blob::new(Arc::new(decoded) as _),
         Some(FontInfoOverride {
             family_name,
             ..Default::default()
         }),
     );
-    if !font_data.is_empty() && registered.is_empty() {
+    if !font_data.is_empty() && family_ids.is_empty() {
         return Err("Invalid bootstrap font data".into());
     }
-    let family_ids: Vec<_> = registered.iter().map(|(id, _)| *id).collect();
     for generic in [
         GenericFamily::SansSerif,
         GenericFamily::Serif,
@@ -177,17 +176,38 @@ pub fn build_single_font_ctx_with_family(
         ctx.collection
             .append_generic_families(generic, family_ids.iter().copied());
     }
-    // Generic families are only queried when CSS names them. Fontique's
-    // script fallbacks also cover missing glyphs in a named author family.
-    // This host-supplied family is the portable substitute for OS fallback;
-    // later subsets retain its identity and actual glyph coverage decides.
+    Ok(ctx)
+}
+
+/// Author fonts supply the portable last-resort collection when OS discovery is
+/// unavailable. Explicit CSS families still win; shaping tests actual coverage.
+fn register_font_with_fallback(
+    collection: &mut parley::fontique::Collection,
+    data: parley::fontique::Blob<u8>,
+    overrides: Option<parley::fontique::FontInfoOverride<'_>>,
+) -> Vec<parley::fontique::FamilyId> {
+    use parley::fontique::{Script, ScriptExt};
+
+    let family_ids: Vec<_> = collection
+        .register_fonts(data, overrides)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
     for script in [*b"Zyyy", *b"Zinh", *b"Zzzz"]
         .into_iter()
         .map(Script::from_bytes)
         .chain(Script::all_samples().iter().map(|(script, _)| *script))
     {
-        ctx.collection
-            .append_fallbacks(script, family_ids.iter().copied());
+        for family_id in &family_ids {
+            // A companion stylesheet can register hundreds of subsets under
+            // one family. The existing collection owns membership and order.
+            if !collection
+                .fallback_families(script)
+                .any(|id| id == *family_id)
+            {
+                collection.append_fallbacks(script, std::iter::once(*family_id));
+            }
+        }
     }
-    Ok(ctx)
+    family_ids
 }

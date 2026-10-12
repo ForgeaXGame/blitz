@@ -1451,9 +1451,11 @@ impl BaseDocument {
 
                 // TODO: Investigate eliminating double-box
                 let mut global_font_ctx = self.font_ctx.lock().unwrap();
-                let registered = global_font_ctx
-                    .collection
-                    .register_fonts(font.clone(), Some(info_override));
+                let registered = crate::register_font_with_fallback(
+                    &mut global_font_ctx.collection,
+                    font.clone(),
+                    Some(info_override),
+                );
                 if registered.is_empty() {
                     self.resource_errors
                         .push((res.resolved_url, "Invalid font data".into()));
@@ -1467,9 +1469,11 @@ impl BaseDocument {
                             .thread_font_contexts
                             .get_or(|| RefCell::new(Box::new(global_font_ctx.clone())))
                             .borrow_mut();
-                        font_ctx
-                            .collection
-                            .register_fonts(font.clone(), Some(info_override));
+                        crate::register_font_with_fallback(
+                            &mut font_ctx.collection,
+                            font.clone(),
+                            Some(info_override),
+                        );
                     });
                 }
                 drop(global_font_ctx);
