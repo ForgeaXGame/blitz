@@ -3,6 +3,7 @@ mod focus;
 mod ime;
 mod keyboard;
 mod pointer;
+pub use pointer::touch_action_pan_axes;
 
 use crate::util::Point;
 use blitz_traits::events::{DomEvent, DomEventData, PointerCoords, UiEvent};

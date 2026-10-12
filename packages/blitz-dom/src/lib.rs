@@ -59,7 +59,6 @@ mod resolved_style;
 /// Scrolling of nodes and the viewport, and scroll animations.
 mod scrolling;
 mod selection;
-mod validation;
 /// Implementations that interact with servo's style engine
 mod shadow;
 mod stylo;
@@ -70,6 +69,7 @@ mod stylo_to_parley;
 pub mod traversal;
 /// Versioned storage for the nodes of the DOM tree.
 mod tree;
+mod validation;
 
 mod url;
 
@@ -122,7 +122,7 @@ pub use style::invalidation::element::restyle_hints::RestyleHint;
 pub use style::media_queries::MediaType;
 pub use style::stylist::RegisterCustomPropertyResult;
 pub type SelectorList = selectors::SelectorList<style::selector_parser::SelectorImpl>;
-pub use events::{EventDriver, EventHandler, NoopEventHandler};
+pub use events::{EventDriver, EventHandler, NoopEventHandler, touch_action_pan_axes};
 pub use html::{DummyHtmlParserProvider, HtmlParserProvider};
 pub use util::{Point, decode_font_bytes};
 
