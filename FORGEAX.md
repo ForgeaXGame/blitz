@@ -6,6 +6,7 @@ fixes the resolved headless dependency graph. Upstream licenses remain unchanged
 
 | Repair | Regression |
 | --- | --- |
+| The pinned Taffy block owner includes the final collapsed in-flow margin in the scrollable end edge, preserving border/gutter exclusion and content alignment | Taffy `block_scroll_extent_includes_the_final_collapsed_margin`; Engine native and generated-WASM/Chromium four-case extent/max-scroll/resize comparisons |
 | Immutable `DocumentConfig::scripting_enabled` feeds HTML document/fragment parsing, noscript serialization and Stylo scripting media queries. It defaults to false; the Engine JavaScript host opts in. Inert template ownership survives detachment/cloning and adopts through ordinary insertion, including shadow descendants | Engine native scripting/template tests and Chromium/WASM head/body, live/template fragments, original startup and template clone/adoption comparisons |
 | `innerHTML` detaches old children without destroying referenced node identities | `mutator::test::inner_html_keeps_detached_node_references_live` |
 | Input current values exist before layout, retain the standard dirty-value distinction, and survive cloning | `mutator::test::input_value_precedes_layout_and_survives_default_attribute_changes` |
