@@ -262,6 +262,9 @@ pub struct BaseDocument {
     pub(crate) last_client_pointer_position: Option<taffy::Point<f32>>,
     /// The node which is currently focussed (if any)
     pub(crate) focus_node_id: Option<NodeId>,
+    /// Scripted focus retains the last accepted focus modality; text controls
+    /// independently require a visible focus indicator.
+    keyboard_focus: bool,
     pub(crate) validation_message: Option<crate::validation::ValidationMessage>,
     /// The node which is currently active (if any)
     pub(crate) active_node_id: Option<NodeId>,
@@ -471,6 +474,7 @@ impl BaseDocument {
             hover_node_is_text: false,
             last_client_pointer_position: None,
             focus_node_id: None,
+            keyboard_focus: true,
             validation_message: None,
             active_node_id: None,
             mousedown_node_id: None,
@@ -1779,6 +1783,41 @@ impl BaseDocument {
     pub fn set_mousedown_node_id(&mut self, node_id: Option<NodeId>) {
         self.mousedown_node_id = node_id.and_then(|id| self.nearest_non_anonymous_ancestor(id));
     }
+    /// An accepted pointer default changes modality only when it moves focus.
+    /// Cancelled pointer defaults and taps on the already focused node retain it.
+    pub fn set_focus_by_pointer(&mut self, node_id: NodeId) -> bool {
+        let Some(node_id) = self.nearest_non_anonymous_ancestor(node_id) else {
+            return false;
+        };
+        if Some(node_id) == self.focus_node_id || !self.can_focus(node_id) {
+            return false;
+        }
+        self.keyboard_focus = false;
+        self.set_focus_to(node_id)
+    }
+
+    /// A non-modified keydown exposes the current focus before event dispatch,
+    /// including when the author cancels its default action.
+    pub fn use_keyboard_focus(&mut self) -> bool {
+        self.keyboard_focus = true;
+        let Some(id) = self.focus_node_id else {
+            return false;
+        };
+        if self.nodes[id]
+            .element_data()
+            .is_some_and(|element| element.element_state.contains(ElementState::FOCUSRING))
+        {
+            return false;
+        }
+        self.snapshot_node_and(id, ElementState::FOCUSRING, |node| {
+            if let Some(element) = node.element_data_mut() {
+                element.element_state.insert(ElementState::FOCUSRING);
+            }
+            node.mark_ancestors_dirty();
+        });
+        true
+    }
+
     pub fn set_focus_to(&mut self, focus_node_id: NodeId) -> bool {
         let Some(focus_node_id) = self.nearest_non_anonymous_ancestor(focus_node_id) else {
             return false;
@@ -1790,6 +1829,13 @@ impl BaseDocument {
             return false;
         }
         self.dismiss_validation_message();
+        let focus_visible = self.keyboard_focus
+            || self.nodes[focus_node_id]
+                .element_data()
+                .is_some_and(|element| {
+                    element.text_input_data().is_some()
+                        || element.name.local == local_name!("select")
+                });
 
         #[cfg(feature = "tracing")]
         tracing::info!("Focussed node {focus_node_id}");
@@ -1807,7 +1853,7 @@ impl BaseDocument {
         self.snapshot_node_and(
             focus_node_id,
             ElementState::FOCUS | ElementState::FOCUSRING,
-            |node| node.focus(shell_provider),
+            |node| node.focus(shell_provider, focus_visible),
         );
 
         self.focus_node_id = Some(focus_node_id);

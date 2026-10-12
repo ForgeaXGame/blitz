@@ -544,7 +544,7 @@ pub(crate) fn handle_pointerdown(
             generate_focus_events(
                 doc,
                 &mut |doc| {
-                    doc.set_focus_to(hit.node_id);
+                    doc.set_focus_by_pointer(hit.node_id);
                 },
                 dispatch_event,
             );
@@ -658,7 +658,7 @@ pub(crate) fn handle_click(
                     generate_focus_events(
                         doc,
                         &mut |doc| {
-                            doc.set_focus_to(node_id);
+                            doc.set_focus_by_pointer(node_id);
                         },
                         dispatch_event,
                     );
@@ -677,7 +677,7 @@ pub(crate) fn handle_click(
                     generate_focus_events(
                         doc,
                         &mut |doc| {
-                            doc.set_focus_to(node_id);
+                            doc.set_focus_by_pointer(node_id);
                         },
                         dispatch_event,
                     );
@@ -703,7 +703,7 @@ pub(crate) fn handle_click(
                             generate_focus_events(
                                 doc,
                                 &mut |doc| {
-                                    doc.set_focus_to(node_id);
+                                    doc.set_focus_by_pointer(node_id);
                                 },
                                 dispatch_event,
                             );

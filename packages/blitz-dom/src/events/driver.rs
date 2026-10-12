@@ -4,6 +4,7 @@ use blitz_traits::events::{
     UiEvent,
 };
 use blitz_traits::node_id::NodeId;
+use keyboard_types::{Key, Modifiers};
 use std::collections::VecDeque;
 
 pub trait EventHandler {
@@ -155,6 +156,14 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
 
         // Update document input state (hover, focus, active, etc)
         match &event {
+            UiEvent::KeyDown(event)
+                if !event
+                    .modifiers
+                    .intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META)
+                    && !matches!(event.key, Key::Control | Key::Alt | Key::Meta) =>
+            {
+                self.doc.inner_mut().use_keyboard_focus();
+            }
             UiEvent::PointerMove(event) => {
                 hover_node_id = self.handle_pointer_move(event);
             }
