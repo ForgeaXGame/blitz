@@ -2319,6 +2319,13 @@ impl BaseDocument {
         // must be invalidated when the scale changes.
         if changes.contains(DeviceChanges::SCALE) {
             self.invalidate_inline_contexts();
+            // Transforms and overflow bounds are also cached in device pixels,
+            // even for replaced/empty boxes with unchanged CSS layout.
+            for (_, node) in self.nodes.iter_mut() {
+                if node.flags.contains(NodeFlags::IS_IN_DOCUMENT) {
+                    node.insert_damage(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW);
+                }
+            }
         }
 
         // Color-scheme changes affect values that are resolved at cascade time

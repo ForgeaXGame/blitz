@@ -40,7 +40,7 @@ use style::{
     },
 };
 
-use kurbo::{self, Affine, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
+use kurbo::{self, Affine, Insets, Point, Rect, Shape, Stroke, Vec2};
 use peniko::{self, Fill, ImageData, ImageSampler};
 use style::values::generics::color::GenericColor;
 use taffy::Layout;
@@ -369,8 +369,6 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             ..
         } = *node.final_layout();
         let box_position = Vec2::new(location.x as f64, location.y as f64) * self.scale;
-        let box_size = Size::new(size.width as f64, size.height as f64);
-        let border_box = Rect::from_origin_size(box_position.to_point(), box_size);
         let scaled_pb = (padding + border).map(f64::from);
         let content_position = kurbo::Point {
             x: scaled_pb.left,
@@ -391,7 +389,8 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             x: -self.initial_x,
             y: -self.initial_y,
         }) * transform;
-        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(border_box));
+        // The resolved overflow already includes the scaled local border box.
+        let screen_bbox = screen_transform.transform_rect_bbox(overflow);
 
         // Cull elements that fall entirely outside the current clip rectangle. In addition to
         // the viewport, `clip_rect` is narrowed by any ancestor scrollport (see below), so this
