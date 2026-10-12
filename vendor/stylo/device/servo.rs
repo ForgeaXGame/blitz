@@ -71,6 +71,8 @@ pub(super) struct ExtraDeviceData {
     prefers_color_scheme: PrefersColorScheme,
     /// The embedder's current reduced-motion preference.
     prefers_reduced_motion: bool,
+    /// Whether the host enables scripting for this document.
+    scripting_enabled: bool,
     /// The capabilities of the primary pointer input
     #[ignore_malloc_size_of = "Pure stack type"]
     primary_pointer_capabilities: PointerCapabilities,
@@ -122,6 +124,7 @@ impl Device {
                 quirks_mode,
                 prefers_color_scheme,
                 prefers_reduced_motion: false,
+                scripting_enabled: false,
                 primary_pointer_capabilities,
                 all_pointer_capabilities,
                 font_metrics_provider,
@@ -316,6 +319,16 @@ impl Device {
     /// Whether the embedder reports that the user prefers reduced motion.
     pub fn prefers_reduced_motion(&self) -> bool {
         self.extra.prefers_reduced_motion
+    }
+
+    /// Set the capability consumed by the standard `scripting` media query.
+    pub fn set_scripting_enabled(&mut self, enabled: bool) {
+        self.extra.scripting_enabled = enabled;
+    }
+
+    /// Whether the host enables scripting.
+    pub fn scripting_enabled(&self) -> bool {
+        self.extra.scripting_enabled
     }
 
     /// Set the [`PointerCapbabilities`] value for the primary pointer on this [`Device`]

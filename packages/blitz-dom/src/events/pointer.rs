@@ -164,7 +164,7 @@ impl PanState {
 /// per-axis at that scroller: `touch-action` values on elements *above* it do not restrict pans it
 /// handles. `touch-action: none` blocks panning entirely, `pan-x`/`pan-y` restrict it to a single
 /// axis, and `auto` / `manipulation` permit both.
-fn touch_action_pan_axes(doc: &BaseDocument, node_id: NodeId) -> (bool, bool) {
+pub fn touch_action_pan_axes(doc: &BaseDocument, node_id: NodeId) -> (bool, bool) {
     let pan_x_flags = TouchAction::AUTO | TouchAction::MANIPULATION | TouchAction::PAN_X;
     let pan_y_flags = TouchAction::AUTO | TouchAction::MANIPULATION | TouchAction::PAN_Y;
 
@@ -197,7 +197,7 @@ fn touch_action_pan_axes(doc: &BaseDocument, node_id: NodeId) -> (bool, bool) {
                 break;
             }
         }
-        current = node.parent;
+        current = node.parent.or(node.shadow_host_id());
     }
 
     (allow_x, allow_y)

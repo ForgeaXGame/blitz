@@ -105,6 +105,9 @@ impl DocumentMutator<'_> {
             return Err("NotSupportedError: this element cannot host a shadow root");
         }
         let connected = node.flags.is_in_document();
+        let in_template_document = node
+            .flags
+            .contains(crate::node::NodeFlags::IS_IN_TEMPLATE_DOCUMENT);
         let root = self.create_document_fragment();
         if let NodeData::DocumentFragment(data) = &mut self.doc.nodes[root].data {
             data.shadow = Some(ShadowData {
@@ -115,6 +118,10 @@ impl DocumentMutator<'_> {
         self.doc.nodes[root]
             .flags
             .set(crate::node::NodeFlags::IS_IN_DOCUMENT, connected);
+        self.doc.nodes[root].flags.set(
+            crate::node::NodeFlags::IS_IN_TEMPLATE_DOCUMENT,
+            in_template_document,
+        );
         self.doc.nodes[host].element_data_mut().unwrap().shadow_root = Some(root);
         self.doc.nodes[host].set_restyle_hint(RestyleHint::restyle_subtree());
         self.doc.nodes[host].insert_damage(crate::layout::damage::ALL_DAMAGE);

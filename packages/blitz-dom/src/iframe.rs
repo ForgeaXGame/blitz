@@ -55,6 +55,7 @@ impl BaseDocument {
         abort_signal: AbortSignal,
     ) -> DocumentConfig {
         DocumentConfig {
+            scripting_enabled: self.scripting_enabled(),
             viewport: None,
             base_url,
             ua_stylesheets: None,

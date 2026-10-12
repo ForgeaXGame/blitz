@@ -86,6 +86,24 @@ fn eval_prefers_reduced_motion(context: &Context, value: Option<PrefersReducedMo
     }
 }
 
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, ToCss)]
+#[repr(u8)]
+enum Scripting {
+    None,
+    InitialOnly,
+    Enabled,
+}
+
+/// https://drafts.csswg.org/mediaqueries-5/#scripting
+fn eval_scripting(context: &Context, value: Option<Scripting>) -> bool {
+    let enabled = context.device().scripting_enabled();
+    match value {
+        Some(Scripting::None) => !enabled,
+        Some(Scripting::InitialOnly) => false,
+        Some(Scripting::Enabled) | None => enabled,
+    }
+}
+
 bitflags! {
     /// https://drafts.csswg.org/mediaqueries-4/#mf-interaction
     #[derive(Debug, Clone, Copy)]
@@ -176,7 +194,13 @@ fn eval_aspect_ratio(context: &Context) -> Ratio {
 }
 
 /// A list with all the media features that Servo supports.
-pub static MEDIA_FEATURES: std::sync::LazyLock<[QueryFeatureDescription; 16]> = std::sync::LazyLock::new(|| [
+pub static MEDIA_FEATURES: std::sync::LazyLock<[QueryFeatureDescription; 17]> = std::sync::LazyLock::new(|| [
+    feature!(
+        crate::Atom::from("scripting"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_scripting, Scripting),
+        FeatureFlags::empty(),
+    ),
     feature!(
         crate::Atom::from("prefers-reduced-motion"),
         AllowsRanges::No,

@@ -139,18 +139,18 @@ impl Node {
                     .parent
                     .and_then(|id| self.tree()[id].data.downcast_element())
                     .is_some_and(|el| {
-                        // Documents are parsed with scripting disabled, so `<noscript>` is not raw text
                         el.name.ns == ns!(html)
-                            && matches!(
-                                el.name.local.as_ref(),
-                                "style"
-                                    | "script"
-                                    | "xmp"
-                                    | "iframe"
-                                    | "noembed"
-                                    | "noframes"
-                                    | "plaintext"
-                            )
+                            && ((el.name.local.as_str() == "noscript" && self.scripting_enabled())
+                                || matches!(
+                                    el.name.local.as_ref(),
+                                    "style"
+                                        | "script"
+                                        | "xmp"
+                                        | "iframe"
+                                        | "noembed"
+                                        | "noframes"
+                                        | "plaintext"
+                                ))
                     });
                 if in_raw_text_element {
                     writer.push_str(data.content.as_str());
