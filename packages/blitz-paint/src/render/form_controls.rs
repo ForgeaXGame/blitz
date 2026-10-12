@@ -4,9 +4,54 @@ use anyrender::PaintScene;
 use blitz_dom::local_name;
 use kurbo::{Affine, BezPath, Circle, Point, Rect, RoundedRect, Stroke, Vec2};
 use peniko::{Fill, Mix};
+use style::computed_value_flags::ComputedValueFlags;
 use style::dom::TElement as _;
 
 impl ElementCx<'_, '_> {
+    pub(super) fn draw_disabled_control_background(
+        &self,
+        scene: &mut impl PaintScene,
+        shape: &BezPath,
+    ) -> bool {
+        if self.node.attr(local_name!("disabled")).is_none()
+            || self
+                .style
+                .flags
+                .intersects(ComputedValueFlags::HAS_AUTHOR_SPECIFIED_BORDER_BACKGROUND)
+        {
+            return false;
+        }
+        let button = self.node.local_name() == "button"
+            || (self.node.local_name() == "input"
+                && matches!(
+                    self.node.attr(local_name!("type")),
+                    Some("button" | "submit" | "reset")
+                ));
+        if !button
+            && self.element.text_input_data().is_none()
+            && self.element.select_data().is_none()
+        {
+            return false;
+        }
+        // Default disabled surfaces are translucent: a lightening underlay
+        // followed by the field/button fill. Authored border/background rules
+        // opt out through Stylo's existing cascade flag, not color equality.
+        scene.fill(
+            Fill::NonZero,
+            self.transform,
+            Color::from_rgba8(169, 169, 169, 51),
+            None,
+            shape,
+        );
+        let fill = if button {
+            Color::from_rgba8(239, 239, 239, 77)
+        } else {
+            Color::from_rgba8(255, 255, 255, 153)
+        };
+        scene.fill(Fill::NonZero, self.transform, fill, None, shape);
+        true
+    }
+
     pub(super) fn draw_input(&self, scene: &mut impl PaintScene) {
         if let Some(select) = self.element.select_data() {
             let frame = self.frame.content_box;
