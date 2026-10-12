@@ -605,6 +605,15 @@ impl ElementData {
         }
     }
 
+    pub(crate) fn is_button_input(&self) -> bool {
+        self.name.local == local_name!("input")
+            && self.attr(local_name!("type")).is_some_and(|value| {
+                ["button", "submit", "reset"]
+                    .iter()
+                    .any(|kind| value.eq_ignore_ascii_case(kind))
+            })
+    }
+
     pub fn text_input_data_mut(&mut self) -> Option<&mut TextInputData> {
         match &mut self.special_data {
             SpecialElementData::TextInput(data) => Some(data),
