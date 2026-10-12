@@ -8,6 +8,7 @@ use kurbo::{Affine, Rect};
 use parley::LayoutContext;
 use selectors::Element as _;
 use style::dom::TDocument;
+use style::values::specified::box_::DisplayInside;
 
 #[cfg(feature = "parallel-construct")]
 use rayon::prelude::*;
@@ -18,7 +19,7 @@ thread_local! {
     pub(crate) static LAYOUT_CTX: RefCell<Option<Box<LayoutContext<TextBrush>>>> = const { RefCell::new(None) };
 }
 
-use taffy::AvailableSpace;
+use taffy::{AvailableSpace, CoreStyle as _};
 
 use crate::{
     BaseDocument,
@@ -115,6 +116,7 @@ impl BaseDocument {
 
         // Resolve transforms
         self.resolve_transforms(root_node_id);
+        self.clamp_scroll_offsets_after_layout();
         self.prepare_validation_message();
         timer.record_time("transform");
 
@@ -170,30 +172,47 @@ impl BaseDocument {
     }
 
     fn resolve_transforms(&mut self, node_id: NodeId) -> Rect {
-        if !self.nodes.contains_key(node_id) {
+        let Some(node) = self.nodes.get(node_id) else {
+            return Rect::ZERO;
+        };
+        // Hidden subtrees retain hoisted/layout lists for restoration, but
+        // their descendants may no longer have computed styles or live boxes.
+        if node
+            .display_style()
+            .is_none_or(|display| display.inside() == DisplayInside::None)
+        {
             return Rect::ZERO;
         }
 
         let scale = self.viewport.scale_f64();
 
-        if !self.nodes[node_id]
-            .damage()
-            .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
-            .unwrap_or(false)
-        {
-            let node = &self.nodes[node_id];
-            let location = node.final_layout().location.map(|v| v as f64 * scale);
-
-            let mut transform = Affine::translate((location.x, location.y));
-            if let Some(t) = node.transform().as_deref() {
-                transform *= *t
+        // Layout rewrites final_layout, including its untransformed overflow,
+        // even for cached subtrees. Project descendant transforms back into that
+        // one scroll extent on every resolve; only rebuild dirty transforms.
+        let transform = if self.nodes[node_id].damage().is_some_and(|d| {
+            d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW)
+        }) {
+            self.nodes[node_id].set_transform(scale as f32)
+        } else {
+            self.nodes[node_id].transform().as_deref().copied()
+        };
+        let mut scroll_overflow = self.nodes[node_id].final_layout().scrollable_overflow_rect;
+        let border = self.nodes[node_id].final_layout().border;
+        let parent_overflow = self.nodes[node_id].layout_style().overflow();
+        let parent_scrolls =
+            parent_overflow.x.is_scroll_container() || parent_overflow.y.is_scroll_container();
+        let mut include_scroll = |rect: Rect| {
+            let rect = Affine::scale(1.0 / scale).transform_rect_bbox(rect);
+            if parent_scrolls && (rect.x1 <= border.left as f64 || rect.y1 <= border.top as f64) {
+                return;
             }
-
-            let overflow = *node.scrollable_overflow();
-            return transform.transform_rect_bbox(overflow);
-        }
-
-        let transform = self.nodes[node_id].set_transform(scale as f32);
+            // Child bounds are border-relative; CSS scroll extents start at
+            // the parent's padding edge. Retain Taffy's padding/margin extent.
+            scroll_overflow.left = scroll_overflow.left.min(rect.x0 as f32 - border.left);
+            scroll_overflow.top = scroll_overflow.top.min(rect.y0 as f32 - border.top);
+            scroll_overflow.right = scroll_overflow.right.max(rect.x1 as f32 - border.left);
+            scroll_overflow.bottom = scroll_overflow.bottom.max(rect.y1 as f32 - border.top);
+        };
 
         let w = self.nodes[node_id].final_layout().size.width as f64 * scale;
         let h = self.nodes[node_id].final_layout().size.height as f64 * scale;
@@ -211,6 +230,7 @@ impl BaseDocument {
                 }
                 let child_rect_in_self = self.resolve_transforms(child_id);
                 overflow = overflow.union(child_rect_in_self);
+                include_scroll(self.scroll_overflow_contribution(child_id, scale));
             }
         }
         let hoisted_children =
@@ -221,6 +241,7 @@ impl BaseDocument {
             }
             let child_rect_in_self = self.resolve_transforms(child_id);
             overflow = overflow.union(child_rect_in_self);
+            include_scroll(self.scroll_overflow_contribution(child_id, scale));
         }
         *self.nodes[node_id].hoisted_children.borrow_mut() = hoisted_children;
         for pseudo in [self.nodes[node_id].before(), self.nodes[node_id].after()] {
@@ -230,8 +251,12 @@ impl BaseDocument {
             }
             let child_rect_in_self = self.resolve_transforms(pseudo);
             overflow = overflow.union(child_rect_in_self);
+            include_scroll(self.scroll_overflow_contribution(pseudo, scale));
         }
 
+        self.nodes[node_id]
+            .final_layout_mut()
+            .scrollable_overflow_rect = scroll_overflow;
         *self.nodes[node_id].scrollable_overflow_mut() = overflow;
         *self.nodes[node_id].layout_children.get_mut() = layout_children;
 
@@ -245,6 +270,57 @@ impl BaseDocument {
         };
 
         full.transform_rect_bbox(overflow)
+    }
+
+    /// The resolved box's contribution to its parent's scroll range. A
+    /// scrolling/contained box contributes its border box; visible overflow
+    /// propagates. CSS transforms may extend that range, never shrink it.
+    fn scroll_overflow_contribution(&self, node_id: NodeId, scale: f64) -> Rect {
+        let node = &self.nodes[node_id];
+        if node
+            .display_style()
+            .is_none_or(|display| display.inside() == DisplayInside::None)
+        {
+            return Rect::ZERO;
+        }
+        let layout = node.final_layout();
+        let style = node.layout_style();
+        let overflow = style.overflow();
+        let contained = overflow.x.is_scroll_container()
+            || overflow.y.is_scroll_container()
+            || style.contain().contains_scrollable_overflow();
+        let mut rect = Rect::new(
+            0.0,
+            0.0,
+            layout.size.width as f64,
+            layout.size.height as f64,
+        );
+        if !contained {
+            if overflow.x == taffy::Overflow::Visible {
+                rect.x0 = rect
+                    .x0
+                    .min((layout.scrollable_overflow_rect.left + layout.border.left) as f64);
+                rect.x1 = rect
+                    .x1
+                    .max((layout.scrollable_overflow_rect.right + layout.border.left) as f64);
+            }
+            if overflow.y == taffy::Overflow::Visible {
+                rect.y0 = rect
+                    .y0
+                    .min((layout.scrollable_overflow_rect.top + layout.border.top) as f64);
+                rect.y1 = rect
+                    .y1
+                    .max((layout.scrollable_overflow_rect.bottom + layout.border.top) as f64);
+            }
+        }
+        rect = Affine::scale(scale).transform_rect_bbox(rect);
+        if let Some(transform) = node.transform().as_deref() {
+            rect = rect.union(transform.transform_rect_bbox(rect));
+        }
+        rect + kurbo::Vec2::new(
+            layout.location.x as f64 * scale,
+            layout.location.y as f64 * scale,
+        )
     }
 
     /// Ensure that the layout_children field is populated for all nodes
@@ -458,8 +534,6 @@ impl BaseDocument {
         state.physicalise_and_round_layout(root_element_id);
         #[cfg(not(feature = "writing-mode"))]
         taffy::round_layout(&mut state, root_element_id);
-
-        self.clamp_scroll_offsets_after_layout();
 
         // println!("\n\n");
         // taffy::print_tree(self, root_node_id)

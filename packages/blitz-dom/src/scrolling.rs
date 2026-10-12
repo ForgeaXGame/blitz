@@ -644,41 +644,88 @@ impl BaseDocument {
         }
     }
 
-    /// Scroll the viewport so that the given element has the requested alignment in each axis.
+    /// Reveal a border box from its innermost scrolling ancestor out to the
+    /// viewport. Return actual changed scrollers so a script bridge can release
+    /// the document borrow before delivering their events.
     pub fn scroll_into_view(
         &mut self,
         node_id: NodeId,
         behavior: ScrollBehavior,
         vertical: ScrollLogicalPosition,
         horizontal: ScrollLogicalPosition,
-    ) {
-        let Some(node) = self.nodes.get(node_id) else {
-            return;
+    ) -> Vec<NodeId> {
+        let Some(node) = self.nodes.get(node_id).filter(|node| node.has_boxes()) else {
+            return Vec::new();
         };
-        let target =
-            node.absolute_position(node.scroll_offset().x as f32, node.scroll_offset().y as f32);
-        let target_size = node.final_layout().size;
-        let Some(root_id) = self.try_root_element().map(|root| root.id) else {
-            return;
-        };
-        let scale = self.viewport.scale() as f64;
-        let viewport_width = self.viewport.window_size.0 as f64 / scale;
-        let viewport_height = self.viewport.window_size.1 as f64 / scale;
-        let x = Self::aligned_scroll_offset(
-            self.viewport_scroll().x,
-            viewport_width,
-            target.x as f64,
-            target_size.width as f64,
-            horizontal,
-        );
-        let y = Self::aligned_scroll_offset(
-            self.viewport_scroll().y,
-            viewport_height,
-            target.y as f64,
-            target_size.height as f64,
-            vertical,
-        );
-        self.scroll_to(root_id, x, y, behavior);
+        let mut target = node
+            .containing_block()
+            .or_else(|| node.flat_parent())
+            .map_or(ScrollTarget::Viewport, ScrollTarget::Node);
+        let mut changed = Vec::new();
+        loop {
+            target = self.canonical_scroll_target(target);
+            let (current, max) = self.scroll_state(target, true);
+            if max != Point::ZERO {
+                let (ancestor, width, height) = match target {
+                    ScrollTarget::Viewport => {
+                        let scale = self.viewport.scale() as f64;
+                        (
+                            None,
+                            self.viewport.window_size.0 as f64 / scale,
+                            self.viewport.window_size.1 as f64 / scale,
+                        )
+                    }
+                    ScrollTarget::Node(id) => {
+                        let node = &self.nodes[id];
+                        (
+                            Some(id),
+                            f64::from(node.client_width()),
+                            f64::from(node.client_height()),
+                        )
+                    }
+                };
+                if let Some(rect) = self.get_client_bounding_rect_in(node_id, ancestor) {
+                    let end = Point {
+                        x: Self::aligned_scroll_offset(
+                            current.x,
+                            width,
+                            current.x + rect.x,
+                            rect.width,
+                            horizontal,
+                        ),
+                        y: Self::aligned_scroll_offset(
+                            current.y,
+                            height,
+                            current.y + rect.y,
+                            rect.height,
+                            vertical,
+                        ),
+                    };
+                    self.scroll(
+                        ScrollRequest {
+                            target,
+                            amount: ScrollAmount::To(end),
+                            overflow: ScrollOverflow::Clamp,
+                            source: ScrollSource::Programmatic,
+                            behavior,
+                            interrupt_animation: true,
+                        },
+                        &mut |event| changed.push(event.target),
+                    );
+                }
+            }
+            match target {
+                ScrollTarget::Viewport => break,
+                ScrollTarget::Node(id) => {
+                    let node = &self.nodes[id];
+                    target = node
+                        .containing_block()
+                        .or_else(|| node.flat_parent())
+                        .map_or(ScrollTarget::Viewport, ScrollTarget::Node);
+                }
+            }
+        }
+        changed
     }
 
     /// Resolve a URL fragment (the `#...` part of a URL) to a scroll target.
