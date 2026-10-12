@@ -193,9 +193,18 @@ impl BaseDocument {
                 y: current.y + by.y,
             },
         };
+        // An axis without a user scrolling mechanism must not reset an offset
+        // established by script. Its full user delta continues up the chain.
+        let end_axis = |desired: f64, current, max| {
+            if !include_hidden && max == 0.0 {
+                current
+            } else {
+                desired.clamp(0.0, max)
+            }
+        };
         let end = Point {
-            x: unclamped.x.clamp(0.0, max.x),
-            y: unclamped.y.clamp(0.0, max.y),
+            x: end_axis(unclamped.x, current.x, max.x),
+            y: end_axis(unclamped.y, current.y, max.y),
         };
 
         if self.should_scroll_smoothly(target, request.behavior) {
@@ -473,6 +482,13 @@ impl BaseDocument {
         target: ScrollTarget,
         include_hidden: bool,
     ) -> (Point<f64>, Point<f64>) {
+        let scrollable = |overflow, viewport| match overflow {
+            Overflow::Scroll | Overflow::Auto => true,
+            Overflow::Hidden => include_hidden,
+            Overflow::Visible => viewport,
+            // Propagated viewport clip behaves as hidden (CSS Overflow 3).
+            Overflow::Clip => viewport && include_hidden,
+        };
         match self.canonical_scroll_target(target) {
             ScrollTarget::Viewport => {
                 // The viewport scrolls the root element's scrollable overflow, which includes
@@ -496,9 +512,27 @@ impl BaseDocument {
                 let scale = self.viewport.scale() as f64;
                 let window_width = self.viewport.window_size.0 as f64 / scale;
                 let window_height = self.viewport.window_size.1 as f64 / scale;
+                let (can_x_scroll, can_y_scroll) = self
+                    .try_root_element()
+                    .and_then(|root| root.primary_styles())
+                    .map(|styles| {
+                        (
+                            scrollable(styles.clone_overflow_x(), true),
+                            scrollable(styles.clone_overflow_y(), true),
+                        )
+                    })
+                    .unwrap_or((false, false));
                 let max = Point {
-                    x: (content_width - window_width).max(0.0),
-                    y: (content_height - window_height).max(0.0),
+                    x: if can_x_scroll {
+                        (content_width - window_width).max(0.0)
+                    } else {
+                        0.0
+                    },
+                    y: if can_y_scroll {
+                        (content_height - window_height).max(0.0)
+                    } else {
+                        0.0
+                    },
                 };
                 (self.viewport_scroll(), max)
             }
@@ -509,17 +543,12 @@ impl BaseDocument {
 
                 // An axis with a non-scrolling overflow value has no scrollable range, even
                 // when its content overflows.
-                let scrollable = |overflow| match overflow {
-                    Overflow::Scroll | Overflow::Auto => true,
-                    Overflow::Hidden => include_hidden,
-                    _ => false,
-                };
                 let (can_x_scroll, can_y_scroll) = node
                     .primary_styles()
                     .map(|styles| {
                         (
-                            scrollable(styles.clone_overflow_x()),
-                            scrollable(styles.clone_overflow_y()),
+                            scrollable(styles.clone_overflow_x(), false),
+                            scrollable(styles.clone_overflow_y(), false),
                         )
                     })
                     .unwrap_or((false, false));
