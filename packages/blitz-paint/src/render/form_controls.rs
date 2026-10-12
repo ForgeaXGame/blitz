@@ -11,7 +11,15 @@ impl ElementCx<'_, '_> {
         if let Some(select) = self.element.select_data() {
             let frame = self.frame.content_box;
             let index = self.context.dom.select_index(self.node.id).unwrap_or(-1);
-            if let Some((_, layout)) = select.choices.get(index as usize) {
+            let preview = if select.open {
+                select
+                    .choices
+                    .iter()
+                    .find(|(option, _)| select.highlighted == Some(*option))
+            } else {
+                None
+            };
+            if let Some((_, layout)) = preview.or_else(|| select.choices.get(index as usize)) {
                 let position = Affine::translate((
                     frame.x0 + 4.0 * self.scale,
                     frame.y0 + (frame.height() - f64::from(layout.height())) / 2.0,
