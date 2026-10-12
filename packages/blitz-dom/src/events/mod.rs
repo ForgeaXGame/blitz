@@ -133,7 +133,7 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
             generate_focus_events(
                 doc,
                 &mut |doc| {
-                    doc.set_focus_to(target_node_id);
+                    doc.set_focus_by_pointer(target_node_id);
                 },
                 &mut dispatch_event,
             );
@@ -163,7 +163,7 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
             generate_focus_events(
                 doc,
                 &mut |doc| {
-                    doc.set_focus_to(target_node_id);
+                    doc.set_focus_by_pointer(target_node_id);
                 },
                 &mut dispatch_event,
             );

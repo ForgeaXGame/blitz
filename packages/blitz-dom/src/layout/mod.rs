@@ -223,22 +223,37 @@ impl LayoutPassState<'_> {
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> taffy::tree::LayoutOutput {
         let orthogonal_percent_basis = self.orthogonal_percent_basis_of(dom_node_id(node_id));
-        let node = &mut self.nodes[dom_node_id(node_id)];
+        let doc = &mut *self.doc;
+        let node = &mut doc.nodes[dom_node_id(node_id)];
 
-        let font_styles = node.primary_styles().map(|style| {
+        let font_styles = node.primary_styles().map(|style| style.clone());
+        let font_size = font_styles
+            .as_ref()
+            .map(|style| style.clone_font_size().used_size().px());
+        let mut measure_line_height = || {
             use style::values::computed::font::LineHeight;
 
-            let font_size = style.clone_font_size().used_size().px();
-            let line_height = match style.clone_line_height() {
-                LineHeight::Normal => font_size * 1.2,
-                LineHeight::Number(num) => font_size * num.0,
-                LineHeight::Length(value) => value.0.px(),
+            let Some(style) = font_styles.as_ref() else {
+                return 16.0;
             };
-
-            (font_size, line_height)
-        });
-        let font_size = font_styles.map(|s| s.0);
-        let resolved_line_height = font_styles.map(|s| s.1);
+            match style.clone_line_height() {
+                LineHeight::Normal => {
+                    // An empty editor line measures the styled font, including leading,
+                    // without letting the current value's fallback glyphs resize the control.
+                    let text_style = crate::stylo_to_parley::style(dom_node_id(node_id), style);
+                    let scale = doc.viewport.scale();
+                    let mut fonts = doc.font_ctx.lock().unwrap();
+                    let builder = doc
+                        .layout_ctx
+                        .tree_builder(&mut fonts, scale, true, &text_style);
+                    let mut strut = builder.build().0;
+                    strut.break_all_lines(None);
+                    strut.height() / scale
+                }
+                LineHeight::Number(num) => font_size.unwrap_or(16.0) * num.0,
+                LineHeight::Length(value) => value.0.px(),
+            }
+        };
 
         match &mut node.data {
             NodeData::Text(data) => {
@@ -294,7 +309,7 @@ impl LayoutPassState<'_> {
                             width: cols
                                 .map(|cols| cols * font_size.unwrap_or(16.0) * 0.6)
                                 .unwrap_or(300.0),
-                            height: resolved_line_height.unwrap_or(16.0) * rows,
+                            height: measure_line_height() * rows,
                         },
                     );
                     if inputs.run_mode == RunMode::PerformLayout {
@@ -383,13 +398,13 @@ impl LayoutPassState<'_> {
                                 inputs,
                                 &node.layout_style(),
                                 resolve_calc_value,
-                                |_known_size, _available_space| taffy::Size {
-                                    width: match inputs.available_space.width {
+                                |_known_size, available_space| taffy::Size {
+                                    width: match available_space.width {
                                         AvailableSpace::Definite(limit) => limit.min(300.0),
                                         AvailableSpace::MinContent => 0.0,
                                         AvailableSpace::MaxContent => 300.0,
                                     },
-                                    height: resolved_line_height.unwrap_or(16.0),
+                                    height: measure_line_height(),
                                 },
                             );
                         }
