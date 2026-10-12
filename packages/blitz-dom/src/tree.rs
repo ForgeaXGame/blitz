@@ -33,6 +33,8 @@ fn to_id(key: NodeKey) -> NodeId {
 /// `None`, and indexing panics) instead of aliasing the new occupant.
 pub struct NodeTree {
     map: SlotMap<NodeKey, Node>,
+    /// Immutable host capability shared by this document and its nodes.
+    pub(crate) scripting_enabled: bool,
     /// Bumped whenever box geometry may have moved (layout ran or a scroll
     /// offset changed). Values derived from `final_layout()` (e.g. hoisted
     /// paint child offsets) are memoised against it. Starts at 1 so that a
@@ -44,9 +46,10 @@ pub struct NodeTree {
 }
 
 impl NodeTree {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(scripting_enabled: bool) -> Self {
         Self {
             map: SlotMap::with_key(),
+            scripting_enabled,
             geometry_generation: AtomicU64::new(1),
             viewport_scroll: crate::Point::ZERO,
         }

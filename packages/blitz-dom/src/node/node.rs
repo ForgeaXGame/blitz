@@ -57,6 +57,16 @@ bitflags! {
         const IS_TABLE_ROOT = 0b00000010;
         /// Whether the node is "in the document" (~= has a parent and isn't a template node)
         const IS_IN_DOCUMENT = 0b00000100;
+        /// The node belongs to the inert template contents document. Detachment
+        /// and cloning preserve this owner; insertion adopts the target owner.
+        const IS_IN_TEMPLATE_DOCUMENT = 0b00001000;
+    }
+}
+
+impl Node {
+    /// Scripting is disabled in the inert template contents document.
+    pub fn scripting_enabled(&self) -> bool {
+        self.tree().scripting_enabled && !self.flags.contains(NodeFlags::IS_IN_TEMPLATE_DOCUMENT)
     }
 }
 

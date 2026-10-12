@@ -68,6 +68,7 @@ pub(crate) fn make_device(
     viewport: &Viewport,
     media_type: MediaType,
     font_ctx: Arc<Mutex<FontContext>>,
+    scripting_enabled: bool,
 ) -> Device {
     let (width, height) = viewport.logical_size();
     let viewport_size = euclid::Size2D::new(width, height);
@@ -90,5 +91,6 @@ pub(crate) fn make_device(
         PointerCapabilities::default(),
     );
     device.set_prefers_reduced_motion(viewport.prefers_reduced_motion);
+    device.set_scripting_enabled(scripting_enabled);
     device
 }

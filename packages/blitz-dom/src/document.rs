@@ -414,10 +414,15 @@ impl BaseDocument {
 
         let viewport = config.viewport.unwrap_or_default();
         let media_type = config.media_type.unwrap_or_else(MediaType::screen);
-        let device = make_device(&viewport, media_type.clone(), font_ctx.clone());
+        let device = make_device(
+            &viewport,
+            media_type.clone(),
+            font_ctx.clone(),
+            config.scripting_enabled,
+        );
         let stylist = Stylist::new(device, QuirksMode::NoQuirks);
         let snapshots = SnapshotMap::new();
-        let nodes = Box::new(NodeTree::new());
+        let nodes = Box::new(NodeTree::new(config.scripting_enabled));
         let guard = SharedRwLock::new();
         let nodes_to_id = HashMap::new();
 
@@ -1062,6 +1067,11 @@ impl BaseDocument {
         self.changed_nodes.is_empty()
     }
 
+    /// Whether this document's host enables scripting.
+    pub fn scripting_enabled(&self) -> bool {
+        self.nodes.scripting_enabled
+    }
+
     pub fn create_text_node(&mut self, text: &str) -> NodeId {
         let content = text.to_string();
         let data = NodeData::Text(TextNodeData::new(content));
@@ -1090,11 +1100,15 @@ impl BaseDocument {
             _ => {}
         }
 
+        let in_template_document = node.flags.contains(NodeFlags::IS_IN_TEMPLATE_DOCUMENT);
         let children = node.children.clone();
         let template = node.element_data().and_then(|data| data.template_contents);
 
         // Create new node
         let new_node_id = self.create_node(data);
+        self.nodes[new_node_id]
+            .flags
+            .set(NodeFlags::IS_IN_TEMPLATE_DOCUMENT, in_template_document);
 
         // Recursively clone children
         let new_children: ThinVec<NodeId> = children
@@ -2297,6 +2311,7 @@ impl BaseDocument {
             &self.viewport,
             self.media_type.clone(),
             self.font_ctx.clone(),
+            self.scripting_enabled(),
         ));
         self.scroll_viewport_by(0.0, 0.0); // Clamp scroll offset
 

@@ -31,6 +31,8 @@ pub enum StyleThreading {
 /// Options used when constructing a [`BaseDocument`](crate::BaseDocument)
 #[derive(Default)]
 pub struct DocumentConfig {
+    /// Whether the host enables scripting for this document. Defaults to `false`.
+    pub scripting_enabled: bool,
     /// The initial `Viewport`
     pub viewport: Option<Viewport>,
     /// The base url which relative URLs are resolved against

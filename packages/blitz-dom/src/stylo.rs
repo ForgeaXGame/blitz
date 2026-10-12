@@ -243,6 +243,8 @@ impl crate::document::BaseDocument {
             thread_local: &mut thread_local,
         };
         let styles = resolve_style(&mut context, node, RuleInclusion::All, None, None);
+        // Queued style tasks must retire while the layout thread flag is set.
+        drop(thread_local);
 
         style::thread_state::exit(ThreadState::LAYOUT);
 

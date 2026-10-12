@@ -100,13 +100,14 @@ impl<'m, 'doc> DocumentHtmlParser<'m, 'doc> {
             Self::parse_xml_into_mutator(mutr, html);
         } else {
             // Parse as HTML
+            let scripting_enabled = mutr.doc.scripting_enabled();
             let mut sink = DocumentHtmlParser::new(mutr);
             sink.is_xml = false;
             let opts = ParseOpts {
                 tokenizer: TokenizerOpts::default(),
                 tree_builder: TreeBuilderOpts {
                     exact_errors: false,
-                    scripting_enabled: false, // Enables parsing of <noscript> tags
+                    scripting_enabled,
                     iframe_srcdoc: false,
                     drop_doctype: true,
                     quirks_mode: QuirksMode::NoQuirks,
@@ -145,19 +146,25 @@ impl<'m, 'doc> DocumentHtmlParser<'m, 'doc> {
             .get_node(element_id)
             .and_then(|node| node.shadow_host_id())
             .unwrap_or(element_id);
+        let scripting_enabled = mutr.doc.get_node(context_id).is_some_and(|node| {
+            node.scripting_enabled()
+                && !node
+                    .data
+                    .is_element_with_tag_name(&blitz_dom::local_name!("template"))
+        });
         let sink = DocumentHtmlParser::new(mutr);
 
         let opts = ParseOpts {
             tokenizer: TokenizerOpts::default(),
             tree_builder: TreeBuilderOpts {
                 exact_errors: false,
-                scripting_enabled: false, // Enables parsing of <noscript> tags
+                scripting_enabled,
                 iframe_srcdoc: false,
                 drop_doctype: true,
                 quirks_mode: QuirksMode::NoQuirks,
             },
         };
-        html5ever::driver::parse_fragment_for_element(sink, opts, context_id, false, None)
+        html5ever::driver::parse_fragment_for_element(sink, opts, context_id, scripting_enabled, None)
             .from_utf8()
             .read_from(&mut html.as_bytes())
             .unwrap();

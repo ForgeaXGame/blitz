@@ -168,6 +168,9 @@ impl DocumentMutator<'_> {
             return contents_id;
         }
         let contents_id = self.create_document_fragment();
+        self.doc.nodes[contents_id]
+            .flags
+            .insert(NodeFlags::IS_IN_TEMPLATE_DOCUMENT);
         if let Some(element) = self
             .doc
             .get_node_mut(template_id)
@@ -733,6 +736,9 @@ impl DocumentMutator<'_> {
         insert_children_fn: &dyn Fn(&mut Node, &[NodeId]),
     ) {
         let new_parent_is_in_document = self.doc.nodes[parent_id].flags.is_in_document();
+        let in_template_document = self.doc.nodes[parent_id]
+            .flags
+            .contains(NodeFlags::IS_IN_TEMPLATE_DOCUMENT);
         self.mutations_occurred |= new_parent_is_in_document && !child_ids.is_empty();
         // Detach the children from their old parents *before* inserting them into
         // the new parent (matching DOM `insertBefore` semantics). If a child is
@@ -788,6 +794,13 @@ impl DocumentMutator<'_> {
             let child = &mut self.doc.nodes[child_id];
             let child_was_in_doc = child.flags.is_in_document();
             child.parent = Some(parent_id);
+            if child.flags.contains(NodeFlags::IS_IN_TEMPLATE_DOCUMENT) != in_template_document {
+                self.doc.iter_subtree_mut(child_id, |id, doc| {
+                    doc.nodes[id]
+                        .flags
+                        .set(NodeFlags::IS_IN_TEMPLATE_DOCUMENT, in_template_document);
+                });
+            }
 
             if new_parent_is_in_document && !child_was_in_doc {
                 self.process_added_subtree(child_id);
