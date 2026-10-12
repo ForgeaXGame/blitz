@@ -26,7 +26,7 @@ const FONT_EMBOLDEN_ENABLED: bool = cfg!(any(
 ));
 
 /// The default color for text selection highlights
-const SELECTION_COLOR: Color = Color::from_rgb8(180, 213, 255);
+const SELECTION_COLOR: Color = Color::from_rgb8(25, 103, 210);
 
 /// Pre-computed `Scene`s for each CustomWidget, keyed by `(document id, node id)`
 type CustomWidgetSceneMap = HashMap<(usize, NodeId), Scene>;

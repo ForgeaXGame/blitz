@@ -608,7 +608,14 @@ impl ElementCx<'_, '_> {
             .as_srgb_color();
 
         let style = match outline.outline_style {
-            OutlineStyle::Auto => return,
+            OutlineStyle::Auto => {
+                // A two-tone native ring stays visible against both light and dark
+                // author surfaces. Author solid/dashed outlines keep their own path.
+                let path = self.frame.border_box_path();
+                scene.stroke(&Stroke::new(4.0 * self.scale), self.transform, Color::WHITE, None, &path);
+                scene.stroke(&Stroke::new(2.0 * self.scale), self.transform, color, None, &path);
+                return;
+            },
             OutlineStyle::BorderStyle(style) => style,
         };
 

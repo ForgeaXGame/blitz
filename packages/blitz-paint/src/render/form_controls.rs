@@ -43,6 +43,22 @@ impl ElementCx<'_, '_> {
         if self.node.local_name() != "input" {
             return;
         }
+        if let Some(rect) = self.node.number_stepper_rect() {
+            if self.node.is_focussed() || self.node.is_hovered() {
+                let rect = kurbo::Rect::new(rect.x0 * self.scale, rect.y0 * self.scale, rect.x1 * self.scale, rect.y1 * self.scale);
+                scene.fill(Fill::NonZero, self.transform, Color::from_rgb8(239, 239, 239), None, &rect);
+                for (direction, y) in [(-1.0, rect.y0 + rect.height() / 4.0), (1.0, rect.y1 - rect.height() / 4.0)] {
+                    let x = rect.center().x;
+                    let mut arrow = BezPath::new();
+                    arrow.move_to((x - 4.0 * self.scale, y - direction * 1.5 * self.scale));
+                    arrow.line_to((x + 4.0 * self.scale, y - direction * 1.5 * self.scale));
+                    arrow.line_to((x, y + direction * 2.5 * self.scale));
+                    arrow.close_path();
+                    scene.fill(Fill::NonZero, self.transform, Color::from_rgb8(128, 128, 128), None, &arrow);
+                }
+            }
+            return;
+        }
         if let Some(value) = self.element.range_value() {
             let constraints = self.element.range_constraints().unwrap();
             let (vertical, reversed) = self.node.range_axis();
@@ -133,9 +149,11 @@ impl ElementCx<'_, '_> {
 
 impl super::BlitzDomPainter<'_, '_> {
     pub(super) fn draw_validation_message(&self, scene: &mut impl PaintScene) {
-        let Some((rect, layout)) = self.dom.validation_message_popup() else {
+        let Some(popup) = self.dom.validation_message_popup() else {
             return;
         };
+        let rect = popup.rect;
+        let layout = popup.layout;
         let transform = Affine::translate((
             self.initial_x + rect[0] * self.scale,
             self.initial_y + rect[1] * self.scale,
@@ -144,10 +162,25 @@ impl super::BlitzDomPainter<'_, '_> {
             kurbo::Rect::new(0.0, 0.0, rect[2] * self.scale, rect[3] * self.scale),
             4.0 * self.scale,
         );
-        scene.fill(Fill::NonZero, transform, Color::WHITE, None, &bounds);
-        scene.stroke(&Stroke::new(self.scale), transform, Color::BLACK, None, &bounds);
+        let background = Color::from_rgb8(248, 248, 248);
+        scene.fill(Fill::NonZero, transform, background, None, &bounds);
+        scene.stroke(&Stroke::new(self.scale), transform, Color::from_rgb8(128, 128, 128), None, &bounds);
+        let x = popup.arrow_x * self.scale;
+        let y = if popup.above { rect[3] * self.scale } else { 0.0 };
+        let direction = if popup.above { 1.0 } else { -1.0 };
+        let mut arrow = BezPath::new();
+        arrow.move_to((x - 8.0 * self.scale, y));
+        arrow.line_to((x, y + direction * 8.0 * self.scale));
+        arrow.line_to((x + 8.0 * self.scale, y));
+        arrow.close_path();
+        scene.fill(Fill::NonZero, transform, background, None, &arrow);
+        let icon = kurbo::Rect::new(8.0 * self.scale, 8.0 * self.scale, 24.0 * self.scale, 24.0 * self.scale);
+        scene.fill(Fill::NonZero, transform, Color::from_rgb8(200, 80, 0), None, &icon);
+        for mark in [kurbo::Rect::new(15.0, 11.0, 17.0, 17.0), kurbo::Rect::new(15.0, 19.0, 17.0, 21.0)] {
+            scene.fill(Fill::NonZero, transform * Affine::scale(self.scale), Color::WHITE, None, &mark);
+        }
         scene.push_clip_layer(Fill::NonZero, transform, &bounds);
-        let text_transform = transform * Affine::translate((8.0 * self.scale, 8.0 * self.scale));
+        let text_transform = transform * Affine::translate((32.0 * self.scale, 8.0 * self.scale));
         for line in layout.lines() {
             for item in line.items() {
                 let parley::PositionedLayoutItem::GlyphRun(glyphs) = item else {

@@ -8,6 +8,13 @@ pub(crate) struct ValidationMessage {
     layout: parley::Layout<TextBrush>,
 }
 
+pub struct ValidationPopup<'a> {
+    pub rect: [f64; 4],
+    pub arrow_x: f64,
+    pub above: bool,
+    pub layout: &'a parley::Layout<TextBrush>,
+}
+
 impl BaseDocument {
     pub fn show_validation_message(&mut self, node: NodeId, text: &str) {
         self.validation_message = (!text.is_empty()).then(|| ValidationMessage {
@@ -51,7 +58,7 @@ impl BaseDocument {
             ..Default::default()
         };
         let scale = self.viewport.scale();
-        let width = (self.viewport.window_size.0 as f32 / scale - 16.0).clamp(1.0, 304.0);
+        let width = (self.viewport.window_size.0 as f32 / scale - 48.0).clamp(1.0, 256.0);
         let mut fonts = self.font_ctx.lock().unwrap();
         let mut builder = self
             .layout_ctx
@@ -63,20 +70,25 @@ impl BaseDocument {
     }
 
     /// A viewport layer, independent of author overflow clips and CSS effects.
-    pub fn validation_message_popup(&self) -> Option<([f64; 4], &parley::Layout<TextBrush>)> {
+    pub fn validation_message_popup(&self) -> Option<ValidationPopup<'_>> {
         let message = self.validation_message.as_ref()?;
         let anchor = self.get_client_bounding_rect(message.node)?;
         let scale = self.viewport.scale_f64();
         let viewport_width = self.viewport.window_size.0 as f64 / scale;
         let viewport_height = self.viewport.window_size.1 as f64 / scale;
-        let width = (message.layout.width() as f64 / scale + 16.0).min(viewport_width);
-        let height = (message.layout.height() as f64 / scale + 16.0).min(viewport_height);
-        let x = anchor.x.min(viewport_width - width).max(0.0);
-        let y = if anchor.y + anchor.height + height <= viewport_height {
-            anchor.y + anchor.height
-        } else {
-            (anchor.y - height).max(0.0)
-        };
-        Some(([x, y, width, height], &message.layout))
+        let width = (message.layout.width() as f64 / scale + 40.0).min((viewport_width - 8.0).max(1.0));
+        let height = (message.layout.height() as f64 / scale + 16.0).min((viewport_height - 16.0).max(1.0));
+        // Keep the pointer attached to the leading edge of the invalid field even
+        // when the viewport forces the bubble to shift or flip above it.
+        let x = (anchor.x - 8.0).clamp(4.0, (viewport_width - width - 4.0).max(4.0));
+        let below = anchor.y + anchor.height + 8.0;
+        let above = below + height > viewport_height - 4.0;
+        let y = if above { (anchor.y - height - 8.0).max(4.0) } else { below };
+        Some(ValidationPopup {
+            rect: [x, y, width, height],
+            arrow_x: (anchor.x + 8.0 - x).clamp(12.0, (width - 12.0).max(12.0)),
+            above,
+            layout: &message.layout,
+        })
     }
 }

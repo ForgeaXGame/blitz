@@ -107,8 +107,12 @@ textarea {
     font-family: monospace;
 }
 
-:focus {
-    outline: 2px solid #4D90FE;
+:focus-visible {
+    outline: 1px auto rgb(16, 16, 16);
+}
+
+input[type="number" i] {
+    appearance: auto;
 }
 
 input[type="range" i] {
