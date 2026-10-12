@@ -1,5 +1,5 @@
 use crate::Document;
-use crate::layout::paint_tree::{HoistedPaintChild, StackingContext};
+use crate::layout::paint_tree::{HoistedPaintChild, StackingContext, hoisted_child_position};
 use bitflags::bitflags;
 use blitz_traits::events::{
     BlitzPointerEvent, BlitzPointerId, DomEventData, HitResult, PointerCoords,
@@ -125,6 +125,8 @@ pub struct Node {
     /// The same as layout_children, but sorted by z-index
     pub paint_children: RefCell<Option<ThinVec<NodeId>>>,
     pub stacking_context: Option<Box<StackingContext>>,
+    /// Geometry-generation cache for paint/hit bounds, independent of CSS scroll extents.
+    pub(crate) paint_bounds: Cell<(u64, KurboRect)>,
     /// The hoisted entries this node's subtree pushed into the enclosing
     /// stacking context on its last (non-skipped) paint-tree build. Replayed
     /// when the subtree is skipped as clean. Empty for stacking-context roots.
@@ -437,6 +439,7 @@ impl Node {
             anonymous_blocks: ThinVec::new(),
             paint_children: RefCell::new(None),
             stacking_context: None,
+            paint_bounds: Cell::new((0, KurboRect::ZERO)),
             sc_contribution_cache: RefCell::new(ThinVec::new()),
 
             flags: NodeFlags::empty(),
@@ -1432,37 +1435,13 @@ impl Node {
             });
         }
 
-        x += self.scroll_offset().x as f32;
-        y += self.scroll_offset().y as f32;
-
-        let overflow_rect = self.final_layout().scrollable_overflow_rect;
-        let matches_content = !(x < 0.0
-            || x > overflow_rect.right + self.scroll_offset().x as f32
-            || y < 0.0
-            || y > overflow_rect.bottom + self.scroll_offset().y as f32);
-
-        let matches_hoisted_content = match &self.stacking_context {
-            Some(sc) => {
-                // Both the point (after the scroll adjustment above) and the
-                // bbox are in this node's unscrolled content coordinates.
-                let bbox = sc.hoisted_content_bbox(self.tree(), self.id, scale);
-                x >= bbox.left && x <= bbox.right && y >= bbox.top && y <= bbox.bottom
-            }
-            None => false,
-        };
-
-        // `scrollable_overflow` is stored in device (scaled) pixels, whereas the
-        // coordinates here are in CSS pixels, so unscale it before comparing.
-        let overflow = *self.scrollable_overflow();
-
-        let matches_overflow = x >= (overflow.x0 / scale) as f32
-            && x <= (overflow.x1 / scale) as f32
-            && y >= (overflow.y0 / scale) as f32
-            && y <= (overflow.y1 / scale) as f32;
-
-        if !matches_self && !matches_content && !matches_hoisted_content && !matches_overflow {
+        let bounds = self.paint_bounds(scale);
+        if !bounds.contains(kurbo::Point::new(x as f64 * scale, y as f64 * scale)) {
             return None;
         }
+
+        x += self.scroll_offset().x as f32;
+        y += self.scroll_offset().y as f32;
 
         // Descendants overwrite, so the innermost scroll container's thumb
         // wins. Thumb coords are border-box relative (unscrolled).
@@ -1485,18 +1464,16 @@ impl Node {
         }
 
         // Positive z_index hoisted children
-        if matches_hoisted_content {
-            if let Some(hoisted) = &self.stacking_context {
-                for hoisted_child in hoisted.pos_z_hoisted_children().rev() {
-                    let pos = hoisted_child.position(self.tree(), self.id);
-                    let x = x - pos.x;
-                    let y = y - pos.y;
-                    if let Some(hit) = self
-                        .with(hoisted_child.node_id)
-                        .hit_inner(x, y, scale, scrollbar)
-                    {
-                        return Some(hit);
-                    }
+        if let Some(hoisted) = &self.stacking_context {
+            for hoisted_child in hoisted.pos_z_hoisted_children().rev() {
+                let pos = hoisted_child.position(self.tree(), self.id);
+                let x = x - pos.x;
+                let y = y - pos.y;
+                if let Some(hit) = self
+                    .with(hoisted_child.node_id)
+                    .hit_inner(x, y, scale, scrollbar)
+                {
+                    return Some(hit);
                 }
             }
         }
@@ -1514,17 +1491,9 @@ impl Node {
                     child_x += content_box_offset.x;
                     child_y += content_box_offset.y;
                 }
-                // Fixed-position children of the root element are positioned
-                // against the viewport and do not scroll with it. (A fixed box
-                // whose containing block is a transformed ancestor scrolls with
-                // that ancestor like any other out-of-flow box.)
-                if child.is_viewport_fixed() {
-                    child_x -= self.scroll_offset().x as f32;
-                    child_y -= self.scroll_offset().y as f32;
-                    let viewport_scroll = self.tree().viewport_scroll();
-                    child_x -= viewport_scroll.x as f32;
-                    child_y -= viewport_scroll.y as f32;
-                }
+                let position = hoisted_child_position(self.tree(), self.id, *child_id);
+                child_x -= position.x;
+                child_y -= position.y;
             }
             if let Some(hit) = child.hit_inner(child_x, child_y, scale, scrollbar) {
                 return Some(hit);
@@ -1532,18 +1501,16 @@ impl Node {
         }
 
         // Negative z_index hoisted children
-        if matches_hoisted_content {
-            if let Some(hoisted) = &self.stacking_context {
-                for hoisted_child in hoisted.neg_z_hoisted_children().rev() {
-                    let pos = hoisted_child.position(self.tree(), self.id);
-                    let x = x - pos.x;
-                    let y = y - pos.y;
-                    if let Some(hit) = self
-                        .with(hoisted_child.node_id)
-                        .hit_inner(x, y, scale, scrollbar)
-                    {
-                        return Some(hit);
-                    }
+        if let Some(hoisted) = &self.stacking_context {
+            for hoisted_child in hoisted.neg_z_hoisted_children().rev() {
+                let pos = hoisted_child.position(self.tree(), self.id);
+                let x = x - pos.x;
+                let y = y - pos.y;
+                if let Some(hit) = self
+                    .with(hoisted_child.node_id)
+                    .hit_inner(x, y, scale, scrollbar)
+                {
+                    return Some(hit);
                 }
             }
         }
@@ -1675,11 +1642,11 @@ impl Node {
         self.taffy_position() == taffy::Position::Fixed
             && self.containing_block().is_some_and(|id| {
                 let cb = self.with(id);
-                cb.parent.is_some_and(|parent| {
-                    matches!(self.with(parent).data, NodeData::Document(_))
-                }) && !cb.primary_styles().is_some_and(|style| {
-                    stylo_taffy::convert::establishes_fixed_containing_block(&style)
-                })
+                cb.parent
+                    .is_some_and(|parent| matches!(self.with(parent).data, NodeData::Document(_)))
+                    && !cb.primary_styles().is_some_and(|style| {
+                        stylo_taffy::convert::establishes_fixed_containing_block(&style)
+                    })
             })
     }
 
@@ -1922,7 +1889,10 @@ impl Node {
         use style::values::specified::box_::DisplayInside;
         if !self.flags.is_in_document()
             || self.display_style().is_some_and(|display| {
-                matches!(display.inside(), DisplayInside::None | DisplayInside::Contents)
+                matches!(
+                    display.inside(),
+                    DisplayInside::None | DisplayInside::Contents
+                )
             })
         {
             return false;
