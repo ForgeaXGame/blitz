@@ -611,7 +611,8 @@ impl ElementCx<'_, '_> {
             OutlineStyle::Auto => {
                 // A two-tone native ring stays visible against both light and dark
                 // author surfaces. Author solid/dashed outlines keep their own path.
-                let path = self.frame.border_box_path();
+                let mut path = self.frame.border_box_path();
+                path.close_path();
                 scene.stroke(&Stroke::new(4.0 * self.scale), self.transform, Color::WHITE, None, &path);
                 scene.stroke(&Stroke::new(2.0 * self.scale), self.transform, color, None, &path);
                 return;
