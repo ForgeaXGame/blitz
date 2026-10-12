@@ -2513,6 +2513,17 @@ impl BaseDocument {
 
     /// Computes the size and position of the `Node` relative to the viewport
     pub fn get_client_bounding_rect(&self, node_id: NodeId) -> Option<BoundingRect> {
+        self.get_client_bounding_rect_in(node_id, None)
+    }
+
+    /// Border bounds in viewport CSS pixels, or in an ancestor's padding-box
+    /// coordinates. The latter omits that ancestor's transform: its scroll
+    /// offsets and client dimensions are local CSS values, not screen distances.
+    pub(crate) fn get_client_bounding_rect_in(
+        &self,
+        node_id: NodeId,
+        ancestor: Option<NodeId>,
+    ) -> Option<BoundingRect> {
         if !self.get_node(node_id)?.has_boxes() {
             return Some(BoundingRect::default());
         }
@@ -2520,7 +2531,7 @@ impl BaseDocument {
         // the union of their per-line-box fragment rects.
         if let Some(rects) = self.inline_fragment_rects(node_id) {
             return rects
-                .map(|rect| self.transform_client_rect(node_id, rect))
+                .map(|rect| self.transform_client_rect(node_id, rect, ancestor))
                 .reduce(BoundingRect::union);
         }
 
@@ -2535,16 +2546,25 @@ impl BaseDocument {
                 width: snap_to_layout_unit(size.width as f64),
                 height: snap_to_layout_unit(size.height as f64),
             },
+            ancestor,
         ))
     }
 
     /// Apply the same resolved transforms as painting/hit testing. Offset geometry
     /// remains untransformed; only CSSOM client rectangles use this projection.
-    fn transform_client_rect(&self, node_id: NodeId, rect: BoundingRect) -> BoundingRect {
+    fn transform_client_rect(
+        &self,
+        node_id: NodeId,
+        rect: BoundingRect,
+        ancestor: Option<NodeId>,
+    ) -> BoundingRect {
         let mut transform = kurbo::Affine::IDENTITY;
         let mut current = Some(node_id);
         let scale = self.viewport().scale_f64();
         while let Some(id) = current {
+            if Some(id) == ancestor {
+                break;
+            }
             let node = &self.nodes[id];
             if let Some(local) = node.transform().as_deref() {
                 let [a, b, c, d, x, y] = local.as_coeffs();
@@ -2567,9 +2587,16 @@ impl BaseDocument {
             rect.x + rect.width,
             rect.y + rect.height,
         ));
+        let origin = ancestor.map_or((0.0, 0.0), |ancestor| {
+            let (position, layout) = self.physical_unrounded_geometry(ancestor);
+            (
+                f64::from(position.x + layout.border.left) - self.viewport_scroll().x,
+                f64::from(position.y + layout.border.top) - self.viewport_scroll().y,
+            )
+        });
         BoundingRect {
-            x: bounds.x0,
-            y: bounds.y0,
+            x: bounds.x0 - origin.0,
+            y: bounds.y0 - origin.1,
             width: bounds.width(),
             height: bounds.height(),
         }
@@ -2649,7 +2676,7 @@ impl BaseDocument {
         }
         match self.inline_fragment_rects(node_id) {
             Some(rects) => rects
-                .map(|rect| self.transform_client_rect(node_id, rect))
+                .map(|rect| self.transform_client_rect(node_id, rect, None))
                 .collect(),
             None => self.get_client_bounding_rect(node_id).into_iter().collect(),
         }
