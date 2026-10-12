@@ -331,6 +331,9 @@ impl ElementCx<'_, '_> {
     }
 
     fn draw_solid_bg(&self, scene: &mut impl PaintScene, shape: &BezPath) {
+        if self.draw_disabled_control_background(scene, shape) {
+            return;
+        }
         let current_color = self.style.clone_color();
         let background_color = &self.style.get_background().background_color;
         let bg_color = background_color

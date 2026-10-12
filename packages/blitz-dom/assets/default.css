@@ -155,17 +155,33 @@ input:disabled,
 textarea:disabled,
 select:disabled,
 button:disabled {
-    color: #808080;
-    border-color: #d1d1d1;
+    border-color: rgb(118 118 118 / 30%);
 }
 
-/* Disabled fields retain a visible state cue even when empty. Controls whose
- * native painter owns the track/marker keep their own disabled appearance. */
+input:disabled,
+textarea:disabled {
+    color: #545454;
+}
+
+button:disabled,
+input[type="submit" i]:disabled,
+input[type="reset" i]:disabled,
+input[type="button" i]:disabled {
+    color: rgb(16 16 16 / 30%);
+}
+
+/* CSS colors remain observable and authored backgrounds win normally. The
+ * native painter composes default disabled surfaces over their backdrop. */
 input:disabled:not([type="checkbox" i]):not([type="radio" i]):not([type="range" i]),
 textarea:disabled,
-select:disabled,
 button:disabled {
-    background-color: #d1d1d1;
+    background-color: rgb(239 239 239 / 30%);
+}
+
+select:disabled {
+    color: #808080;
+    background-color: #efefef;
+    opacity: 0.7;
 }
 
 /* Button-flavored inputs clip their contents to the border box and never
