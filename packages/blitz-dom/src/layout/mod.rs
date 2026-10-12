@@ -344,7 +344,7 @@ impl LayoutPassState<'_> {
                 if let Some(select) = element_data.select_data() {
                     let size = taffy::Size {
                         width: select.intrinsic_width as f32,
-                        height: select.row_height as f32,
+                        height: (select.line_height + 2.0) as f32,
                     };
                     return compute_leaf_layout(
                         inputs,

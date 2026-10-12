@@ -405,7 +405,7 @@ impl BaseDocument {
                 continue;
             };
 
-            if element.inline_layout_data.is_some() {
+            if element.inline_layout_data.is_some() || element.select_data().is_some() {
                 if node.is_anonymous() {
                     anon_nodes.push(node.id);
                 } else {

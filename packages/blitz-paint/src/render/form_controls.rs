@@ -221,8 +221,8 @@ impl super::BlitzDomPainter<'_, '_> {
                 &bounds,
             );
             for (index, (option, layout)) in select.choices.iter().enumerate() {
-                let top = index as f64 * select.row_height * self.scale;
-                if top + select.row_height * self.scale > bounds.height() {
+                let top = index as f64 * select.row_height() * self.scale;
+                if top + select.row_height() * self.scale > bounds.height() {
                     break;
                 }
                 if select.highlighted == Some(*option) {
@@ -235,7 +235,7 @@ impl super::BlitzDomPainter<'_, '_> {
                             0.0,
                             top,
                             bounds.width(),
-                            top + select.row_height * self.scale,
+                            top + select.row_height() * self.scale,
                         ),
                     );
                 }
@@ -246,7 +246,7 @@ impl super::BlitzDomPainter<'_, '_> {
                     transform
                         * Affine::translate((
                             4.0 * self.scale,
-                            top + (select.row_height * self.scale - f64::from(layout.height()))
+                            top + (select.row_height() * self.scale - f64::from(layout.height()))
                                 / 2.0,
                         )),
                     self.scale,

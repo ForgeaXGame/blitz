@@ -56,11 +56,17 @@ input {
 
 select {
     display: inline-block;
+    box-sizing: border-box;
+    font-size: 13.333333px;
     color: black;
     background: white;
     border: 1px solid #999;
-    padding: 0 2px;
+    padding: 0;
     vertical-align: baseline;
+}
+
+select:disabled {
+    color: #808080;
 }
 
 select option, select optgroup {
