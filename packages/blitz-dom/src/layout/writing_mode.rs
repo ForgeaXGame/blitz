@@ -388,6 +388,10 @@ impl BaseDocument {
                 pos.x -= node.scroll_offset().x as f32;
                 pos.y -= node.scroll_offset().y as f32;
             }
+            if node.is_viewport_fixed() {
+                pos.x += self.viewport_scroll().x as f32;
+                pos.y += self.viewport_scroll().y as f32;
+            }
             has_vertical |= node.layout_data().writing_mode.is_vertical();
             current = node.containing_block();
         }
@@ -434,6 +438,10 @@ impl BaseDocument {
         };
         pos.x += location.x - placer.scroll_offset().x as f32;
         pos.y += location.y - placer.scroll_offset().y as f32;
+        if node.is_viewport_fixed() {
+            pos.x += self.viewport_scroll().x as f32;
+            pos.y += self.viewport_scroll().y as f32;
+        }
         (pos, placer.layout_data().writing_mode, size)
     }
 }

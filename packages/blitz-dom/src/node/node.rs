@@ -1518,7 +1518,7 @@ impl Node {
                 // against the viewport and do not scroll with it. (A fixed box
                 // whose containing block is a transformed ancestor scrolls with
                 // that ancestor like any other out-of-flow box.)
-                if child_position == taffy::Position::Fixed && self.containing_block().is_none() {
+                if child.is_viewport_fixed() {
                     child_x -= self.scroll_offset().x as f32;
                     child_y -= self.scroll_offset().y as f32;
                     let viewport_scroll = self.tree().viewport_scroll();
@@ -1669,10 +1669,29 @@ impl Node {
             .or_else(|| self.layout_parent.get())
     }
 
+    /// Fixed boxes use the viewport unless an ancestor establishes a fixed
+    /// containing block. The root element itself has a Document layout parent.
+    pub fn is_viewport_fixed(&self) -> bool {
+        self.taffy_position() == taffy::Position::Fixed
+            && self.containing_block().is_some_and(|id| {
+                let cb = self.with(id);
+                cb.parent.is_some_and(|parent| {
+                    matches!(self.with(parent).data, NodeData::Document(_))
+                }) && !cb.primary_styles().is_some_and(|style| {
+                    stylo_taffy::convert::establishes_fixed_containing_block(&style)
+                })
+            })
+    }
+
     /// Computes the Document-relative coordinates of the `Node`
     pub fn absolute_position(&self, x: f32, y: f32) -> crate::util::Point<f32> {
-        let x = x + self.final_layout().location.x - self.scroll_offset().x as f32;
-        let y = y + self.final_layout().location.y - self.scroll_offset().y as f32;
+        let mut x = x + self.final_layout().location.x - self.scroll_offset().x as f32;
+        let mut y = y + self.final_layout().location.y - self.scroll_offset().y as f32;
+        if self.is_viewport_fixed() {
+            let scroll = self.tree().viewport_scroll();
+            x += scroll.x as f32;
+            y += scroll.y as f32;
+        }
 
         // Recurse up the positioning hierarchy
         self.containing_block()
