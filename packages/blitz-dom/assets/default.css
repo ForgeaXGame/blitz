@@ -91,6 +91,7 @@ input[type="radio"] {
 
 input,
 textarea {
+    color: black;
     border: 1px solid #999;
     padding: 2px;
     background-color: white;
