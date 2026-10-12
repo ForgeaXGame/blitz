@@ -65,10 +65,6 @@ select {
     vertical-align: baseline;
 }
 
-select:disabled {
-    color: #808080;
-}
-
 select option, select optgroup {
     display: none;
 }
@@ -144,6 +140,14 @@ input[type="button"] {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled,
+button:disabled {
+    color: #808080;
+    border-color: #d1d1d1;
 }
 
 /* Button-flavored inputs clip their contents to the border box and never
