@@ -230,29 +230,48 @@ impl LayoutPassState<'_> {
         let font_size = font_styles
             .as_ref()
             .map(|style| style.clone_font_size().used_size().px());
-        let mut measure_line_height = || {
-            use style::values::computed::font::LineHeight;
-
-            let Some(style) = font_styles.as_ref() else {
-                return 16.0;
-            };
-            match style.clone_line_height() {
-                LineHeight::Normal => {
-                    // An empty editor line measures the styled font, including leading,
-                    // without letting the current value's fallback glyphs resize the control.
-                    let text_style = crate::stylo_to_parley::style(dom_node_id(node_id), style);
-                    let scale = doc.viewport.scale();
-                    let mut fonts = doc.font_ctx.lock().unwrap();
-                    let builder = doc
-                        .layout_ctx
-                        .tree_builder(&mut fonts, scale, true, &text_style);
-                    let mut strut = builder.build().0;
-                    strut.break_all_lines(None);
-                    strut.height() / scale
-                }
-                LineHeight::Number(num) => font_size.unwrap_or(16.0) * num.0,
-                LineHeight::Length(value) => value.0.px(),
-            }
+        let metrics_provider = crate::font_metrics::BlitzFontMetricsProvider {
+            font_ctx: doc.font_ctx.clone(),
+        };
+        let mut column_advance = None;
+        let mut measure_columns = |columns: u32| {
+            let advance = *column_advance.get_or_insert_with(|| {
+                font_styles
+                    .as_ref()
+                    .map(|style| {
+                        metrics_provider.control_character_width(
+                            style.get_font(),
+                            style.clone_font_size().used_size(),
+                        )
+                    })
+                    .unwrap_or(font_size.unwrap_or(16.0) * 0.5)
+            });
+            (advance * columns as f32).ceil()
+        };
+        let mut line_metrics = None;
+        let mut measure_line = || {
+            *line_metrics.get_or_insert_with(|| {
+                let Some(style) = font_styles.as_ref() else {
+                    return (16.0, 16.0);
+                };
+                // An empty line measures the styled font and explicit line-height without
+                // letting the current value's fallback glyphs resize or shift the control.
+                let text_style = crate::stylo_to_parley::style(dom_node_id(node_id), style);
+                let scale = doc.viewport.scale();
+                let mut fonts = doc.font_ctx.lock().unwrap();
+                let builder = doc
+                    .layout_ctx
+                    .tree_builder(&mut fonts, scale, true, &text_style);
+                let mut strut = builder.build().0;
+                strut.break_all_lines(None);
+                (
+                    strut.height() / scale,
+                    strut
+                        .lines()
+                        .next()
+                        .map_or(0.0, |line| line.metrics().baseline / scale),
+                )
+            })
         };
 
         match &mut node.data {
@@ -292,24 +311,27 @@ impl LayoutPassState<'_> {
             NodeData::Element(element_data) | NodeData::AnonymousBlock(element_data) => {
                 // TODO: deduplicate with single-line text input
                 if *element_data.name.local == *"textarea" {
-                    let rows = element_data
-                        .attr(local_name!("rows"))
-                        .and_then(|val| val.parse::<f32>().ok())
-                        .unwrap_or(2.0);
-
-                    let cols = element_data
-                        .attr(local_name!("cols"))
-                        .and_then(|val| val.parse::<f32>().ok());
+                    let dimension = |name, default| {
+                        element_data
+                            .attr(name)
+                            .and_then(|value| {
+                                style::servo::attr::parse_unsigned_integer(value.chars()).ok()
+                            })
+                            .filter(|value| *value > 0)
+                            .unwrap_or(default)
+                    };
+                    let rows = dimension(local_name!("rows"), 2);
+                    let cols = dimension(local_name!("cols"), 20);
 
                     let output = compute_leaf_layout(
                         inputs,
                         &node.layout_style(),
                         resolve_calc_value,
                         |_known_size, _available_space| taffy::Size {
-                            width: cols
-                                .map(|cols| cols * font_size.unwrap_or(16.0) * 0.6)
-                                .unwrap_or(300.0),
-                            height: measure_line_height() * rows,
+                            // HTML cols describes visible characters, with room for the
+                            // native vertical scrollbar even before content overflows.
+                            width: measure_columns(cols) + 15.0,
+                            height: measure_line().0 * rows as f32,
                         },
                     );
                     if inputs.run_mode == RunMode::PerformLayout {
@@ -346,12 +368,19 @@ impl LayoutPassState<'_> {
                         width: select.intrinsic_width as f32,
                         height: (select.line_height + 2.0) as f32,
                     };
-                    return compute_leaf_layout(
+                    let mut output = compute_leaf_layout(
                         inputs,
                         &node.layout_style(),
                         resolve_calc_value,
                         |_known_size, _available_space| size,
                     );
+                    let (line_height, baseline) = measure_line();
+                    let baseline = (output.size.height - line_height) / 2.0 + baseline;
+                    output.baselines = taffy::Baselines {
+                        first: Some(baseline),
+                        last: Some(baseline),
+                    };
+                    return output;
                 }
                 if *element_data.name.local == *"input" {
                     match element_data.attr(local_name!("type")) {
@@ -360,7 +389,7 @@ impl LayoutPassState<'_> {
                             return taffy::LayoutOutput::HIDDEN;
                         }
                         Some("range") => {
-                            return compute_leaf_layout(
+                            let mut output = compute_leaf_layout(
                                 inputs,
                                 &node.layout_style(),
                                 resolve_calc_value,
@@ -369,9 +398,14 @@ impl LayoutPassState<'_> {
                                     height: 16.0,
                                 },
                             );
+                            output.baselines = taffy::Baselines {
+                                first: Some(output.size.height),
+                                last: Some(output.size.height),
+                            };
+                            return output;
                         }
-                        Some("checkbox") => {
-                            return compute_leaf_layout(
+                        Some("checkbox" | "radio") => {
+                            let mut output = compute_leaf_layout(
                                 inputs,
                                 &node.layout_style(),
                                 resolve_calc_value,
@@ -392,21 +426,45 @@ impl LayoutPassState<'_> {
                                     }
                                 },
                             );
+                            output.baselines = taffy::Baselines {
+                                first: Some(output.size.height),
+                                last: Some(output.size.height),
+                            };
+                            return output;
                         }
                         _ if element_data.text_input_is_multiline() == Some(false) => {
-                            return compute_leaf_layout(
+                            let columns = element_data
+                                .attr(local_name!("size"))
+                                .filter(|_| {
+                                    element_data.attr(local_name!("type")) != Some("number")
+                                })
+                                .and_then(|value| {
+                                    style::servo::attr::parse_unsigned_integer(value.chars()).ok()
+                                })
+                                .filter(|value| *value > 0)
+                                .unwrap_or(20);
+                            let mut output = compute_leaf_layout(
                                 inputs,
                                 &node.layout_style(),
                                 resolve_calc_value,
                                 |_known_size, available_space| taffy::Size {
                                     width: match available_space.width {
-                                        AvailableSpace::Definite(limit) => limit.min(300.0),
+                                        AvailableSpace::Definite(limit) => {
+                                            limit.min(measure_columns(columns))
+                                        }
                                         AvailableSpace::MinContent => 0.0,
-                                        AvailableSpace::MaxContent => 300.0,
+                                        AvailableSpace::MaxContent => measure_columns(columns),
                                     },
-                                    height: measure_line_height(),
+                                    height: measure_line().0,
                                 },
                             );
+                            let (line_height, baseline) = measure_line();
+                            let baseline = (output.size.height - line_height) / 2.0 + baseline;
+                            output.baselines = taffy::Baselines {
+                                first: Some(baseline),
+                                last: Some(baseline),
+                            };
+                            return output;
                         }
                         _ => {}
                     }

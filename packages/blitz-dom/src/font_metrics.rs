@@ -2,9 +2,12 @@ use std::sync::{Arc, Mutex};
 
 use crate::stylo_to_parley;
 use app_units::Au;
+use parley::fontique::{Query, QueryFont, QueryStatus};
 use parley::{FontContext, FontVariation};
 use skrifa::MetadataProvider as _;
 use skrifa::charmap::Charmap;
+use skrifa::instance::{LocationRef, Size};
+use skrifa::metrics::{GlyphMetrics, Metrics};
 use style::properties::style_structs::Font as FontStyles;
 use style::{
     device::servo::FontMetricsProvider,
@@ -34,6 +37,83 @@ fn query_for_font_styles<'a>(
     query
 }
 
+fn find_font_for(query: &mut Query, ch: char) -> Option<QueryFont> {
+    let mut font = None;
+    query.matches_with(|q_font: &QueryFont| {
+        use skrifa::MetadataProvider;
+
+        let Ok(font_ref) = skrifa::FontRef::from_index(q_font.blob.as_ref(), q_font.index) else {
+            return QueryStatus::Continue;
+        };
+
+        let charmap = font_ref.charmap();
+        if charmap.map(ch).is_some() {
+            font = Some(q_font.clone());
+            QueryStatus::Stop
+        } else {
+            QueryStatus::Continue
+        }
+    });
+    font
+}
+
+/// Scales the advance the same way as Parley's shaped glyph advances (font units × size / upem)
+/// rather than with skrifa's FreeType-compatible fixed-point scale, so that `ch`/`ic`
+/// lengths exactly match the width of the corresponding laid-out text.
+fn advance_of(
+    query: &mut Query,
+    ch: char,
+    font_size: f32,
+    variations: &[FontVariation],
+) -> Option<(f32, Option<f32>)> {
+    let font = find_font_for(query, ch)?;
+    let font_ref = skrifa::FontRef::from_index(font.blob.as_ref(), font.index).ok()?;
+    let location = font_ref.axes().location(
+        font.synthesis.variation_settings().iter().copied().chain(
+            variations
+                .iter()
+                .map(|v| (skrifa::Tag::from_be_bytes(v.tag.to_bytes()), v.value)),
+        ),
+    );
+    let location_ref = LocationRef::from(&location);
+    let metrics = Metrics::new(&font_ref, Size::unscaled(), location_ref);
+    let upem = metrics.units_per_em;
+    if upem == 0 {
+        return None;
+    }
+    let glyph_metrics = GlyphMetrics::new(&font_ref, Size::unscaled(), location_ref);
+    let char_map = Charmap::new(&font_ref);
+    let glyph_id = char_map.map(ch)?;
+    let advance = glyph_metrics.advance_width(glyph_id)?;
+    let scale = font_size / upem as f32;
+    Some((
+        advance * scale,
+        metrics.average_width.map(|width| width * scale),
+    ))
+}
+
+impl BlitzFontMetricsProvider {
+    /// HTML text controls use the font's average advance. Match Chromium's CJK
+    /// heuristic: fonts whose average describes a full-width ideograph use `0`
+    /// instead. This stays separate from CSS `ch`, which always means `0`.
+    pub(crate) fn control_character_width(
+        &self,
+        font_styles: &FontStyles,
+        font_size: CSSPixelLength,
+    ) -> f32 {
+        let mut font_ctx = self.font_ctx.lock().unwrap();
+        let mut query = query_for_font_styles(&mut font_ctx, font_styles);
+        let variations = stylo_to_parley::font_variations(&font_styles.font_variation_settings);
+        let Some((zero, average)) = advance_of(&mut query, '0', font_size.px(), &variations) else {
+            return font_size.px() * 0.5;
+        };
+        average
+            .filter(|width| *width > 0.0 && *width <= zero * 1.7)
+            .map(|width| width.max(width.round()))
+            .unwrap_or(zero)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct BlitzFontMetricsProvider {
     pub(crate) font_ctx: Arc<Mutex<FontContext>>,
@@ -53,10 +133,6 @@ impl FontMetricsProvider for BlitzFontMetricsProvider {
         font_size: CSSPixelLength,
         _flags: QueryFontMetricsFlags,
     ) -> FontMetrics {
-        use parley::fontique::{Query, QueryFont, QueryStatus};
-        use skrifa::instance::{LocationRef, Size};
-        use skrifa::metrics::{GlyphMetrics, Metrics};
-
         // Lock font_ctx. Explicit reborrow required for borrow checker.
         let mut font_ctx = self.font_ctx.lock().unwrap();
         let font_ctx = &mut *font_ctx;
@@ -80,55 +156,6 @@ impl FontMetricsProvider for BlitzFontMetricsProvider {
         //         .collect()
         // }
 
-        fn find_font_for(query: &mut Query, ch: char) -> Option<QueryFont> {
-            let mut font = None;
-            query.matches_with(|q_font: &QueryFont| {
-                use skrifa::MetadataProvider;
-
-                let Ok(font_ref) = skrifa::FontRef::from_index(q_font.blob.as_ref(), q_font.index)
-                else {
-                    return QueryStatus::Continue;
-                };
-
-                let charmap = font_ref.charmap();
-                if charmap.map(ch).is_some() {
-                    font = Some(q_font.clone());
-                    QueryStatus::Stop
-                } else {
-                    QueryStatus::Continue
-                }
-            });
-            font
-        }
-
-        /// Scales the advance the same way as Parley's shaped glyph advances (font units × size / upem)
-        /// rather than with skrifa's FreeType-compatible fixed-point scale, so that `ch`/`ic`
-        /// lengths exactly match the width of the corresponding laid-out text.
-        fn advance_of(
-            query: &mut Query,
-            ch: char,
-            font_size: f32,
-            variations: &[FontVariation],
-        ) -> Option<f32> {
-            let font = find_font_for(query, ch)?;
-            let font_ref = skrifa::FontRef::from_index(font.blob.as_ref(), font.index).ok()?;
-            let location = font_ref.axes().location(
-                variations
-                    .iter()
-                    .map(|v| (skrifa::Tag::from_be_bytes(v.tag.to_bytes()), v.value)),
-            );
-            let location_ref = LocationRef::from(&location);
-            let upem = Metrics::new(&font_ref, Size::unscaled(), location_ref).units_per_em;
-            if upem == 0 {
-                return None;
-            }
-            let glyph_metrics = GlyphMetrics::new(&font_ref, Size::unscaled(), location_ref);
-            let char_map = Charmap::new(&font_ref);
-            let glyph_id = char_map.map(ch)?;
-            let advance = glyph_metrics.advance_width(glyph_id)?;
-            Some(advance * (font_size / upem as f32))
-        }
-
         fn metrics_of(
             query: &mut Query,
             ch: char,
@@ -138,17 +165,21 @@ impl FontMetricsProvider for BlitzFontMetricsProvider {
             let font = find_font_for(query, ch)?;
             let font_ref = skrifa::FontRef::from_index(font.blob.as_ref(), font.index).ok()?;
             let location = font_ref.axes().location(
-                variations
-                    .iter()
-                    .map(|v| (skrifa::Tag::from_be_bytes(v.tag.to_bytes()), v.value)),
+                font.synthesis.variation_settings().iter().copied().chain(
+                    variations
+                        .iter()
+                        .map(|v| (skrifa::Tag::from_be_bytes(v.tag.to_bytes()), v.value)),
+                ),
             );
             let location_ref = LocationRef::from(&location);
             let metrics = Metrics::new(&font_ref, font_size, location_ref);
             Some((metrics.ascent, metrics.x_height, metrics.cap_height))
         }
 
-        let zero_advance = advance_of(&mut query, '0', font_size.px(), &variations);
-        let ic_advance = advance_of(&mut query, '\u{6C34}', font_size.px(), &variations);
+        let zero_advance =
+            advance_of(&mut query, '0', font_size.px(), &variations).map(|metrics| metrics.0);
+        let ic_advance = advance_of(&mut query, '\u{6C34}', font_size.px(), &variations)
+            .map(|metrics| metrics.0);
         let (ascent, x_height, cap_height) =
             metrics_of(&mut query, ' ', Size::new(font_size.px()), &variations)
                 .unwrap_or((0.0, None, None));

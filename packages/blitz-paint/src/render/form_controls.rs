@@ -311,7 +311,7 @@ fn draw_checkbox(
         scene.stroke(&style, transform, Color::WHITE, None, &path);
     } else {
         scene.fill(Fill::NonZero, transform, Color::WHITE, None, &frame);
-        scene.stroke(&Stroke::default(), transform, accent_color, None, &frame);
+        scene.stroke(&Stroke::default(), transform, color::palette::css::GRAY, None, &frame);
     }
 }
 
