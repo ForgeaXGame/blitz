@@ -12,8 +12,14 @@ pub struct SelectInput {
     pub open: bool,
     pub highlighted: Option<NodeId>,
     pub choices: Vec<(NodeId, parley::Layout<TextBrush>)>,
-    pub row_height: f64,
+    pub line_height: f64,
     pub intrinsic_width: f64,
+}
+
+impl SelectInput {
+    pub fn row_height(&self) -> f64 {
+        self.line_height + 6.0
+    }
 }
 
 impl ElementData {
@@ -286,8 +292,18 @@ impl BaseDocument {
         drop(style);
         let scale = self.viewport.scale();
         let mut choices = Vec::with_capacity(options.len());
-        let mut width = 20.0_f64;
-        let mut row_height = 18.0_f64;
+        let mut width = 0.0_f64;
+        // Closed controls and popup rows share the font strut, not popup padding.
+        // An empty select still has the same native control height.
+        let line_height = {
+            let mut fonts = self.font_ctx.lock().unwrap();
+            let builder = self
+                .layout_ctx
+                .tree_builder(&mut fonts, scale, true, &text_style);
+            let mut strut = builder.build().0;
+            strut.break_all_lines(None);
+            f64::from(strut.height() / scale)
+        };
         for option in options {
             let node = &self.nodes[option];
             let text = node
@@ -308,7 +324,6 @@ impl BaseDocument {
             let mut layout = builder.build().0;
             layout.break_all_lines(None);
             width = width.max(f64::from(layout.width() / scale));
-            row_height = row_height.max(f64::from(layout.height() / scale));
             choices.push((option, layout));
         }
         let data = self.nodes[id]
@@ -317,8 +332,8 @@ impl BaseDocument {
             .select_data_mut()
             .unwrap();
         data.choices = choices;
-        data.row_height = row_height + 6.0;
-        data.intrinsic_width = width + 22.0;
+        data.line_height = line_height;
+        data.intrinsic_width = width.ceil() + 20.0;
     }
     /// Popup is a viewport layer, so the same rectangle drives painting and input.
     pub fn select_popup_rect(&self, id: NodeId) -> Option<[f64; 4]> {
@@ -333,7 +348,7 @@ impl BaseDocument {
         }
         let rect = self.get_client_bounding_rect(id)?;
         let viewport = self.get_viewport();
-        let height = data.row_height * data.choices.len() as f64;
+        let height = data.row_height() * data.choices.len() as f64;
         let viewport_height = f64::from(viewport.window_size.1) / f64::from(viewport.scale());
         let viewport_width = f64::from(viewport.window_size.0) / f64::from(viewport.scale());
         let width = rect.width.max(data.intrinsic_width).min(viewport_width);
@@ -375,7 +390,7 @@ impl BaseDocument {
                     .unwrap()
                     .select_data()
                     .unwrap();
-                let index = ((y - rect[1]) / data.row_height).floor() as usize;
+                let index = ((y - rect[1]) / data.row_height()).floor() as usize;
                 if let Some(option) = data.choices.get(index).map(|choice| choice.0) {
                     if !self.option_disabled(option) {
                         self.nodes[id]
@@ -421,11 +436,10 @@ impl BaseDocument {
             .select_data()
             .unwrap()
             .open;
-        if key == "Escape" {
-            self.select_close(id);
+        if key == "Escape" && !open {
             return false;
         }
-        if key == " " || key == "Enter" {
+        if key == " " || key == "Enter" || key == "Escape" {
             if open {
                 let highlighted = self.nodes[id]
                     .element_data()
@@ -435,7 +449,9 @@ impl BaseDocument {
                     .highlighted;
                 if let Some(index) = options
                     .iter()
-                    .position(|option| Some(*option) == highlighted)
+                    .position(|option| {
+                        Some(*option) == highlighted && !self.option_disabled(*option)
+                    })
                 {
                     self.set_select_index(id, index as i32);
                 }

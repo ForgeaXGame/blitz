@@ -1,9 +1,9 @@
 use super::ElementCx;
-use crate::color::Color;
+use crate::color::{Color, ToColorColor as _};
 use anyrender::PaintScene;
 use blitz_dom::local_name;
 use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, RoundedRect, Stroke, Vec2};
-use peniko::Fill;
+use peniko::{Fill, Mix};
 use style::dom::TElement as _;
 
 impl ElementCx<'_, '_> {
@@ -11,9 +11,17 @@ impl ElementCx<'_, '_> {
         if let Some(select) = self.element.select_data() {
             let frame = self.frame.content_box;
             let index = self.context.dom.select_index(self.node.id).unwrap_or(-1);
-            if let Some((_, layout)) = select.choices.get(index as usize) {
+            let preview = if select.open {
+                select
+                    .choices
+                    .iter()
+                    .find(|(option, _)| select.highlighted == Some(*option))
+            } else {
+                None
+            };
+            if let Some((_, layout)) = preview.or_else(|| select.choices.get(index as usize)) {
                 let position = Affine::translate((
-                    frame.x0,
+                    frame.x0 + 4.0 * self.scale,
                     frame.y0 + (frame.height() - f64::from(layout.height())) / 2.0,
                 ));
                 crate::text::stroke_text(
@@ -32,15 +40,31 @@ impl ElementCx<'_, '_> {
             arrow.line_to((center.x, center.y + 1.5 * self.scale));
             arrow.line_to((center.x + 3.0 * self.scale, center.y - 1.5 * self.scale));
             scene.stroke(
-                &Stroke::new(self.scale),
+                &Stroke::new(2.0 * self.scale),
                 self.transform,
-                Color::BLACK,
+                self.style.clone_color().as_srgb_color(),
                 None,
                 &arrow,
             );
             return;
         }
         if self.node.local_name() != "input" {
+            return;
+        }
+        if let Some(rect) = self.node.number_stepper_rect() {
+            if self.node.is_focussed() || self.node.is_hovered() {
+                let rect = kurbo::Rect::new(rect.x0 * self.scale, rect.y0 * self.scale, rect.x1 * self.scale, rect.y1 * self.scale);
+                scene.fill(Fill::NonZero, self.transform, Color::from_rgb8(239, 239, 239), None, &rect);
+                for (direction, y) in [(-1.0, rect.y0 + rect.height() / 4.0), (1.0, rect.y1 - rect.height() / 4.0)] {
+                    let x = rect.center().x;
+                    let mut arrow = BezPath::new();
+                    arrow.move_to((x - 4.0 * self.scale, y - direction * 1.5 * self.scale));
+                    arrow.line_to((x + 4.0 * self.scale, y - direction * 1.5 * self.scale));
+                    arrow.line_to((x, y + direction * 2.5 * self.scale));
+                    arrow.close_path();
+                    scene.fill(Fill::NonZero, self.transform, Color::from_rgb8(128, 128, 128), None, &arrow);
+                }
+            }
             return;
         }
         if let Some(value) = self.element.range_value() {
@@ -133,9 +157,11 @@ impl ElementCx<'_, '_> {
 
 impl super::BlitzDomPainter<'_, '_> {
     pub(super) fn draw_validation_message(&self, scene: &mut impl PaintScene) {
-        let Some((rect, layout)) = self.dom.validation_message_popup() else {
+        let Some(popup) = self.dom.validation_message_popup() else {
             return;
         };
+        let rect = popup.rect;
+        let layout = popup.layout;
         let transform = Affine::translate((
             self.initial_x + rect[0] * self.scale,
             self.initial_y + rect[1] * self.scale,
@@ -144,10 +170,25 @@ impl super::BlitzDomPainter<'_, '_> {
             kurbo::Rect::new(0.0, 0.0, rect[2] * self.scale, rect[3] * self.scale),
             4.0 * self.scale,
         );
-        scene.fill(Fill::NonZero, transform, Color::WHITE, None, &bounds);
-        scene.stroke(&Stroke::new(self.scale), transform, Color::BLACK, None, &bounds);
+        let background = Color::from_rgb8(248, 248, 248);
+        scene.fill(Fill::NonZero, transform, background, None, &bounds);
+        scene.stroke(&Stroke::new(self.scale), transform, Color::from_rgb8(128, 128, 128), None, &bounds);
+        let x = popup.arrow_x * self.scale;
+        let y = if popup.above { rect[3] * self.scale } else { 0.0 };
+        let direction = if popup.above { 1.0 } else { -1.0 };
+        let mut arrow = BezPath::new();
+        arrow.move_to((x - 8.0 * self.scale, y));
+        arrow.line_to((x, y + direction * 8.0 * self.scale));
+        arrow.line_to((x + 8.0 * self.scale, y));
+        arrow.close_path();
+        scene.fill(Fill::NonZero, transform, background, None, &arrow);
+        let icon = kurbo::Rect::new(8.0 * self.scale, 8.0 * self.scale, 24.0 * self.scale, 24.0 * self.scale);
+        scene.fill(Fill::NonZero, transform, Color::from_rgb8(200, 80, 0), None, &icon);
+        for mark in [kurbo::Rect::new(15.0, 11.0, 17.0, 17.0), kurbo::Rect::new(15.0, 19.0, 17.0, 21.0)] {
+            scene.fill(Fill::NonZero, transform * Affine::scale(self.scale), Color::WHITE, None, &mark);
+        }
         scene.push_clip_layer(Fill::NonZero, transform, &bounds);
-        let text_transform = transform * Affine::translate((8.0 * self.scale, 8.0 * self.scale));
+        let text_transform = transform * Affine::translate((32.0 * self.scale, 8.0 * self.scale));
         for line in layout.lines() {
             for item in line.items() {
                 let parley::PositionedLayoutItem::GlyphRun(glyphs) = item else {
@@ -188,8 +229,8 @@ impl super::BlitzDomPainter<'_, '_> {
                 &bounds,
             );
             for (index, (option, layout)) in select.choices.iter().enumerate() {
-                let top = index as f64 * select.row_height * self.scale;
-                if top + select.row_height * self.scale > bounds.height() {
+                let top = index as f64 * select.row_height() * self.scale;
+                if top + select.row_height() * self.scale > bounds.height() {
                     break;
                 }
                 if select.highlighted == Some(*option) {
@@ -202,8 +243,20 @@ impl super::BlitzDomPainter<'_, '_> {
                             0.0,
                             top,
                             bounds.width(),
-                            top + select.row_height * self.scale,
+                            top + select.row_height() * self.scale,
                         ),
+                    );
+                }
+                let disabled = self.dom.option_disabled(*option);
+                if disabled {
+                    scene.push_layer(
+                        Fill::NonZero,
+                        Mix::Normal,
+                        0.5,
+                        transform,
+                        &bounds,
+                        None,
+                        None,
                     );
                 }
                 crate::text::stroke_text(
@@ -213,13 +266,16 @@ impl super::BlitzDomPainter<'_, '_> {
                     transform
                         * Affine::translate((
                             4.0 * self.scale,
-                            top + (select.row_height * self.scale - f64::from(layout.height()))
+                            top + (select.row_height() * self.scale - f64::from(layout.height()))
                                 / 2.0,
                         )),
                     self.scale,
                     id,
                     &mut self.draw_text_context.borrow_mut(),
                 );
+                if disabled {
+                    scene.pop_layer();
+                }
             }
         }
     }

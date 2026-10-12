@@ -2827,8 +2827,12 @@ impl BaseDocument {
             return false;
         }
         self.with_text_input(node_id, |mut driver| {
+            let changed = driver.editor.raw_text() != value;
             driver.editor.set_text(value);
             driver.refresh_layout();
+            if changed {
+                driver.move_to_text_end();
+            }
         });
         let node = &mut self.nodes[node_id];
         node.element_data_mut()

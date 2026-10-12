@@ -476,7 +476,6 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             None,
         );
 
-        cx.draw_outline(scene);
         cx.draw_outset_box_shadow(scene);
 
         // clip-path clip ayer
@@ -588,6 +587,10 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                 cx.maybe_pop_css_mask_layer(scene, mask_layer_pushed);
             },
         );
+
+        // Outlines paint over the element's border/content. Auto focus rings
+        // include an inner dark stroke, which the author background must not cover.
+        cx.draw_outline(scene);
 
         self.layer_manager
             .maybe_pop_layer(scene, css_clip_layer_pushed);
@@ -911,6 +914,12 @@ impl ElementCx<'_, '_> {
             let transform = self.transform
                 * Affine::translate((pos.x * self.scale - scroll_x, pos.y * self.scale - scroll_y));
 
+            let stepper = self.node.number_stepper_rect();
+            if let Some(stepper) = stepper {
+                let mut clip = self.frame.content_box;
+                clip.x1 = stepper.x0 * self.scale;
+                scene.push_clip_layer(Fill::NonZero, self.transform, &clip);
+            }
             if self.node.is_focussed() {
                 // Render selection/caret
                 for (rect, _line_idx) in input_data.editor.selection_geometry().iter() {
@@ -950,6 +959,30 @@ impl ElementCx<'_, '_> {
                 self.node.id,
                 &mut draw_text_context,
             );
+            if self.node.is_focussed() {
+                // Selected text uses the native highlight foreground independently
+                // of the author's normal input color.
+                for (rect, _) in input_data.editor.selection_geometry().iter() {
+                    scene.push_clip_layer(Fill::NonZero, transform, &convert_rect(rect));
+                    for line in input_data.editor.try_layout().unwrap().lines() {
+                        for item in line.items() {
+                            let parley::PositionedLayoutItem::GlyphRun(glyphs) = item else { continue; };
+                            let run = glyphs.run();
+                            scene.draw_glyphs(
+                                run.font(), run.font_size(), true,
+                                bytemuck::cast_slice(run.normalized_coords()), Vec2::ZERO,
+                                Fill::NonZero, &anyrender::Paint::from(Color::WHITE), 1.0,
+                                transform, None,
+                                glyphs.positioned_glyphs().map(|glyph| anyrender::Glyph {
+                                    id: glyph.id as _, x: glyph.x, y: glyph.y,
+                                }),
+                            );
+                        }
+                    }
+                    scene.pop_layer();
+                }
+            }
+            if stepper.is_some() { scene.pop_layer(); }
         }
     }
 

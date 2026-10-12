@@ -11,7 +11,7 @@ pub struct RangeInput {
 /// One geometry contract for native painting and pointer defaults (CSS pixels).
 pub const RANGE_THUMB_SIZE: f64 = 16.0;
 
-pub struct RangeConstraints {
+pub struct NumericConstraints {
     pub min: f64,
     pub max: f64,
     pub step: Option<f64>,
@@ -31,7 +31,7 @@ fn precision(value: &str) -> i32 {
     (fractional - exponent.parse::<i32>().unwrap_or(0)).clamp(0, 308)
 }
 
-impl RangeConstraints {
+impl NumericConstraints {
     pub fn sanitize(&self, value: Option<f64>) -> f64 {
         let value = value
             .unwrap_or(self.min / 2.0 + self.max / 2.0)
@@ -56,17 +56,57 @@ impl RangeConstraints {
         }
     }
 
+    /// A number editor keeps its text; stepping only derives the next permitted value.
+    pub fn stepped(&self, text: &str, count: i32) -> Option<f64> {
+        let step = self.step?;
+        if self.min > self.max || count == 0 { return None; }
+        let current = number(text);
+        let value = current.unwrap_or(0.0);
+        let quotient = (value - self.base) / step;
+        if !quotient.is_finite() { return None; }
+        let tolerance = f64::EPSILON * quotient.abs().max(1.0) * 8.0;
+        let aligned = (quotient - quotient.round()).abs() <= tolerance;
+        let first = if aligned { quotient.round() }
+            else if count > 0 { quotient.ceil() - 1.0 }
+            else { quotient.floor() + 1.0 };
+        let low = ((self.min - self.base) / step - tolerance).ceil();
+        let high = ((self.max - self.base) / step + tolerance).floor();
+        if low > high { return None; }
+        let next = (first + f64::from(count)).clamp(low, high);
+        let next = self.base + next * step;
+        if current.is_some() && ((count > 0 && next < value) || (count < 0 && next > value)) {
+            return None;
+        }
+        let scale = 10_f64.powi(self.precision.max(precision(text)));
+        let next = if (next * scale).is_finite() { (next * scale).round() / scale } else { next };
+        next.is_finite().then_some(next)
+    }
+
+    pub fn stepped_by_user(&mut self, text: &str, count: i32) -> Option<f64> {
+        if self.step.is_none() {
+            self.step = Some(1.0);
+            self.base = number(text).unwrap_or(0.0);
+        }
+        self.stepped(text, count)
+    }
+
     pub fn parse(&self, value: &str) -> f64 {
         self.sanitize(number(value))
     }
 }
 
 impl ElementData {
-    pub fn range_constraints(&self) -> Option<RangeConstraints> {
+    pub fn range_constraints(&self) -> Option<NumericConstraints> {
+        self.attr(local_name!("type"))
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("range"))
+            .then(|| self.numeric_constraints()).flatten()
+    }
+
+    pub fn numeric_constraints(&self) -> Option<NumericConstraints> {
         if self.name.local != local_name!("input")
             || !self
                 .attr(local_name!("type"))
-                .is_some_and(|kind| kind.eq_ignore_ascii_case("range"))
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("range") || kind.eq_ignore_ascii_case("number"))
         {
             return None;
         }
@@ -74,10 +114,12 @@ impl ElementData {
         let max_text = self.attr(local_name!("max")).unwrap_or("");
         let value_text = self.attr(local_name!("value")).unwrap_or("");
         let step_text = self.attr(local_name!("step")).unwrap_or("");
-        let min = number(min_text).unwrap_or(0.0);
-        Some(RangeConstraints {
+        let range = self.attr(local_name!("type")).is_some_and(|kind| kind.eq_ignore_ascii_case("range"));
+        let min = number(min_text).unwrap_or(if range { 0.0 } else { f64::NEG_INFINITY });
+        let max = number(max_text).unwrap_or(if range { 100.0 } else { f64::INFINITY });
+        Some(NumericConstraints {
             min,
-            max: number(max_text).unwrap_or(100.0).max(min),
+            max: if range { max.max(min) } else { max },
             step: if step_text.eq_ignore_ascii_case("any") {
                 None
             } else {
@@ -140,5 +182,26 @@ impl Node {
             let wm = style.writing_mode;
             (wm.is_vertical(), !wm.is_bidi_ltr())
         })
+    }
+}
+
+impl Node {
+    /// Native number buttons and hit defaults share this element-local CSS rectangle.
+    /// Disabled/read-only controls have no interactive decoration.
+    pub fn number_stepper_rect(&self) -> Option<kurbo::Rect> {
+        let element = self.element_data()?;
+        if !element.attr(local_name!("type")).is_some_and(|kind| kind.eq_ignore_ascii_case("number"))
+            || element.attr(local_name!("readonly")).is_some()
+            || element.element_state.contains(style_dom::ElementState::DISABLED)
+            || self.primary_styles()?.clone_appearance() == style::values::specified::Appearance::Textfield
+        { return None; }
+        let layout = self.final_layout();
+        let text = element.text_input_data()?.editor.try_layout()?;
+        let height = (text.height() / text.scale()).min(layout.content_box_height()).max(0.0) as f64;
+        let width = 15.0_f64.min(layout.content_box_width() as f64).max(0.0);
+        let right = (layout.size.width - layout.border.right - layout.padding.right) as f64;
+        let top = (layout.border.top + layout.padding.top) as f64
+            + (layout.content_box_height() as f64 - height) / 2.0;
+        Some(kurbo::Rect::new(right - width, top, right, top + height))
     }
 }

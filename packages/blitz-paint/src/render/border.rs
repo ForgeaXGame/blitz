@@ -608,7 +608,36 @@ impl ElementCx<'_, '_> {
             .as_srgb_color();
 
         let style = match outline.outline_style {
-            OutlineStyle::Auto => return,
+            OutlineStyle::Auto => {
+                // Keep the light rim outside the author border and the dark ring
+                // inside it. Overlapping strokes would leave a second white rim
+                // inside the control. Author outlines keep their own path.
+                let mut frame = self.frame.clone();
+                frame.outline_width = self.scale;
+                frame.outline_box = frame.border_box.inset(self.scale);
+                scene.fill(
+                    Fill::NonZero,
+                    self.transform,
+                    Color::WHITE,
+                    None,
+                    &frame.outline(),
+                );
+
+                frame.outline_box = frame.border_box;
+                frame.outline_width = 2.0 * self.scale;
+                frame.border_box = frame.border_box.inset(-2.0 * self.scale);
+                for radius in [
+                    &mut frame.border_radii.top_left,
+                    &mut frame.border_radii.top_right,
+                    &mut frame.border_radii.bottom_right,
+                    &mut frame.border_radii.bottom_left,
+                ] {
+                    radius.x = (radius.x - 2.0 * self.scale).max(0.0);
+                    radius.y = (radius.y - 2.0 * self.scale).max(0.0);
+                }
+                scene.fill(Fill::NonZero, self.transform, color, None, &frame.outline());
+                return;
+            }
             OutlineStyle::BorderStyle(style) => style,
         };
 

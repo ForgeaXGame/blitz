@@ -25,7 +25,7 @@ pub use element::{
     SpecialElementType, Status,
 };
 pub use node::*;
-pub use range::{RANGE_THUMB_SIZE, RangeConstraints, RangeInput};
+pub use range::{RANGE_THUMB_SIZE, NumericConstraints, RangeInput};
 pub use scrollbar::{ScrollbarColor, ScrollbarRef, ScrollbarWidth};
 pub use select::SelectInput;
 pub use stylo_data::ComputedStyleRef;
