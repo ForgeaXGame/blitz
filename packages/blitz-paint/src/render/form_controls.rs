@@ -52,18 +52,16 @@ impl ElementCx<'_, '_> {
             return;
         }
         if let Some(rect) = self.node.number_stepper_rect() {
-            if self.node.is_focussed() || self.node.is_hovered() {
-                let rect = kurbo::Rect::new(rect.x0 * self.scale, rect.y0 * self.scale, rect.x1 * self.scale, rect.y1 * self.scale);
-                scene.fill(Fill::NonZero, self.transform, Color::from_rgb8(239, 239, 239), None, &rect);
-                for (direction, y) in [(-1.0, rect.y0 + rect.height() / 4.0), (1.0, rect.y1 - rect.height() / 4.0)] {
-                    let x = rect.center().x;
-                    let mut arrow = BezPath::new();
-                    arrow.move_to((x - 4.0 * self.scale, y - direction * 1.5 * self.scale));
-                    arrow.line_to((x + 4.0 * self.scale, y - direction * 1.5 * self.scale));
-                    arrow.line_to((x, y + direction * 2.5 * self.scale));
-                    arrow.close_path();
-                    scene.fill(Fill::NonZero, self.transform, Color::from_rgb8(128, 128, 128), None, &arrow);
-                }
+            let rect = kurbo::Rect::new(rect.x0 * self.scale, rect.y0 * self.scale, rect.x1 * self.scale, rect.y1 * self.scale);
+            scene.fill(Fill::NonZero, self.transform, Color::from_rgb8(239, 239, 239), None, &rect);
+            for (direction, y) in [(-1.0, rect.y0 + rect.height() / 4.0), (1.0, rect.y1 - rect.height() / 4.0)] {
+                let x = rect.center().x;
+                let mut arrow = BezPath::new();
+                arrow.move_to((x - 4.0 * self.scale, y - direction * 1.5 * self.scale));
+                arrow.line_to((x + 4.0 * self.scale, y - direction * 1.5 * self.scale));
+                arrow.line_to((x, y + direction * 2.5 * self.scale));
+                arrow.close_path();
+                scene.fill(Fill::NonZero, self.transform, Color::from_rgb8(128, 128, 128), None, &arrow);
             }
             return;
         }
