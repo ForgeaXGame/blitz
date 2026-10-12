@@ -78,8 +78,6 @@ input[type="hidden" i] {
 
 input[type="checkbox"] {
     box-sizing: border-box;
-    width: 13px;
-    height: 13px;
     margin: 3px 3px 3px 4px;
     padding: 0;
     border: 0;
@@ -87,8 +85,6 @@ input[type="checkbox"] {
 
 input[type="radio"] {
     box-sizing: border-box;
-    width: 13px;
-    height: 13px;
     border-radius: 14px;
     border: none;
     margin: 3px 3px 0 5px;
@@ -161,6 +157,15 @@ select:disabled,
 button:disabled {
     color: #808080;
     border-color: #d1d1d1;
+}
+
+/* Disabled fields retain a visible state cue even when empty. Controls whose
+ * native painter owns the track/marker keep their own disabled appearance. */
+input:disabled:not([type="checkbox" i]):not([type="radio" i]):not([type="range" i]),
+textarea:disabled,
+select:disabled,
+button:disabled {
+    background-color: #d1d1d1;
 }
 
 /* Button-flavored inputs clip their contents to the border box and never
