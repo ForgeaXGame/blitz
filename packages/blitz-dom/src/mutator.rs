@@ -747,6 +747,7 @@ impl DocumentMutator<'_> {
         // parent's child list, and anchor indices would be computed against a
         // child list that still contains the moved nodes.
         for child_id in child_ids.iter().copied() {
+            self.doc.focus_navigation_removing(child_id);
             let child = &mut self.doc.nodes[child_id];
             let child_was_in_doc = child.flags.is_in_document();
             self.mutations_occurred |= child_was_in_doc;
@@ -789,6 +790,13 @@ impl DocumentMutator<'_> {
         }
 
         insert_children_fn(new_parent, child_ids);
+        if let Some(index) = child_ids
+            .first()
+            .and_then(|id| new_parent.children.iter().position(|child| child == id))
+        {
+            self.doc
+                .focus_navigation_inserted(parent_id, index, child_ids.len());
+        }
 
         for child_id in child_ids.iter().copied() {
             let child = &mut self.doc.nodes[child_id];
@@ -1106,6 +1114,7 @@ impl<'doc> DocumentMutator<'doc> {
     }
 
     fn process_removed_subtree(&mut self, node_id: NodeId) {
+        self.doc.focus_navigation_removing(node_id);
         self.doc.iter_subtree_mut(node_id, |node_id, doc| {
             doc.nodes[node_id]
                 .flags

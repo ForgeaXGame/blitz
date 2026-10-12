@@ -262,6 +262,7 @@ pub struct BaseDocument {
     pub(crate) last_client_pointer_position: Option<taffy::Point<f32>>,
     /// The node which is currently focussed (if any)
     pub(crate) focus_node_id: Option<NodeId>,
+    pub(crate) focus_navigation_start: Option<crate::focus_navigation::FocusNavigationStart>,
     /// Scripted focus retains the last accepted focus modality; text controls
     /// independently require a visible focus indicator.
     keyboard_focus: bool,
@@ -479,6 +480,7 @@ impl BaseDocument {
             hover_node_is_text: false,
             last_client_pointer_position: None,
             focus_node_id: None,
+            focus_navigation_start: None,
             keyboard_focus: true,
             validation_message: None,
             active_node_id: None,
@@ -1767,21 +1769,6 @@ impl BaseDocument {
         }
     }
 
-    pub fn focus_next_node(&mut self) -> Option<NodeId> {
-        let focussed_node_id = self.get_focussed_node_id()?;
-        let id = self.next_node(&self.nodes[focussed_node_id], |node| node.is_focussable())?;
-        self.set_focus_to(id);
-        Some(id)
-    }
-
-    /// Move focus to the previous focussable node in the document
-    pub fn focus_prev_node(&mut self) -> Option<NodeId> {
-        let focussed_node_id = self.get_focussed_node_id()?;
-        let id = self.prev_node(&self.nodes[focussed_node_id], |node| node.is_focussable())?;
-        self.set_focus_to(id);
-        Some(id)
-    }
-
     /// Clear the focussed node
     pub fn clear_focus(&mut self) {
         self.dismiss_validation_message();
@@ -1871,6 +1858,9 @@ impl BaseDocument {
         );
 
         self.focus_node_id = Some(focus_node_id);
+        self.focus_navigation_start = Some(crate::focus_navigation::FocusNavigationStart::Node(
+            focus_node_id,
+        ));
 
         true
     }
@@ -1937,9 +1927,12 @@ impl BaseDocument {
         }) {
             return false;
         }
-        let mut ancestor = node.flat_parent();
+        let mut ancestor = Some(node_id);
         while let Some(id) = ancestor {
             let parent = &self.nodes[id];
+            if parent.attr(local_name!("inert")).is_some() {
+                return false;
+            }
             if parent.display_style().is_some_and(|display| {
                 display.inside() == style::values::specified::box_::DisplayInside::None
             }) {
