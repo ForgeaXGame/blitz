@@ -2,7 +2,7 @@ use super::ElementCx;
 use crate::color::{Color, ToColorColor as _};
 use anyrender::PaintScene;
 use blitz_dom::local_name;
-use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, RoundedRect, Stroke, Vec2};
+use kurbo::{Affine, BezPath, Circle, Point, Rect, RoundedRect, Stroke, Vec2};
 use peniko::{Fill, Mix};
 use style::dom::TElement as _;
 
@@ -96,27 +96,74 @@ impl ElementCx<'_, '_> {
             } else {
                 Color::from_rgba8(0, 117, 255, 255)
             };
-            let track = Stroke::new(4.0 * self.scale).with_caps(Cap::Round);
-            scene.stroke(
-                &track,
-                self.transform,
-                Color::from_rgba8(210, 210, 210, 255),
-                None,
-                &kurbo::Line::new(start, end),
+            // The thumb keeps its shared 16px layout/hit box. Painting is
+            // inset by half a CSS pixel; the track spans the control itself.
+            let track_height = (8.0 * self.scale).min(if vertical {
+                frame.width()
+            } else {
+                frame.height()
+            });
+            let inset = self.scale.min(
+                if vertical {
+                    frame.height()
+                } else {
+                    frame.width()
+                } / 2.0,
             );
-            scene.stroke(
-                &track,
+            let track = if vertical {
+                Rect::new(
+                    frame.center().x - track_height / 2.0,
+                    frame.y0 + inset,
+                    frame.center().x + track_height / 2.0,
+                    frame.y1 - inset,
+                )
+            } else {
+                Rect::new(
+                    frame.x0 + inset,
+                    frame.center().y - track_height / 2.0,
+                    frame.x1 - inset,
+                    frame.center().y + track_height / 2.0,
+                )
+            };
+            let rounding = track_height / 2.0;
+            scene.fill(
+                Fill::NonZero,
+                self.transform,
+                Color::from_rgb8(239, 239, 239),
+                None,
+                &track.to_rounded_rect(rounding),
+            );
+            let value_track = if vertical {
+                if reversed {
+                    Rect::new(track.x0, center.y, track.x1, track.y1)
+                } else {
+                    Rect::new(track.x0, track.y0, track.x1, center.y)
+                }
+            } else if reversed {
+                Rect::new(center.x, track.y0, track.x1, track.y1)
+            } else {
+                Rect::new(track.x0, track.y0, center.x, track.y1)
+            };
+            scene.fill(
+                Fill::NonZero,
                 self.transform,
                 accent,
                 None,
-                &kurbo::Line::new(if reversed { end } else { start }, center),
+                &value_track.to_rounded_rect(rounding),
+            );
+            scene.stroke(
+                &Stroke::new(self.scale),
+                self.transform,
+                Color::new([118.0 / 255.0, 118.0 / 255.0, 118.0 / 255.0, 0.5]),
+                None,
+                &track.inset(-self.scale / 2.0).to_rounded_rect(rounding),
             );
             scene.fill(
                 Fill::NonZero,
                 self.transform,
                 accent,
                 None,
-                &Circle::new(center, radius),
+                &Circle::new(center, (radius - self.scale / 2.0).max(0.0)),
             );
             return;
         }
@@ -133,22 +180,68 @@ impl ElementCx<'_, '_> {
             Color::from_rgba8(0, 117, 255, 255)
         };
 
-        let width = self.frame.border_box.width();
-        let height = self.frame.border_box.height();
-        let min_dimension = width.min(height);
-        let scale = (min_dimension - 4.0).max(0.0) / 16.0;
-
-        let frame = self.frame.border_box.to_rounded_rect(scale * 2.0);
-
-        match type_attr {
-            Some("checkbox") => {
-                draw_checkbox(scene, checked, frame, self.transform, accent_color, scale);
-            }
-            Some("radio") => {
-                let center = frame.center();
-                draw_radio_button(scene, checked, center, self.transform, accent_color, scale);
-            }
-            _ => {}
+        // Native controls paint inside the largest centered square. Borders
+        // use CSS pixels; the checkmark and radio dot scale with that square.
+        let bounds = self.frame.border_box;
+        let side = bounds.width().min(bounds.height());
+        if side <= 0.0 {
+            return;
+        }
+        let center = bounds.center();
+        let frame = Rect::from_center_size(center, (side, side));
+        let radio = type_attr == Some("radio");
+        let radius = if radio { side / 2.0 } else { 2.0 * self.scale };
+        let background = frame.inset(-0.2 * self.scale).to_rounded_rect(radius);
+        scene.fill(
+            Fill::NonZero,
+            self.transform,
+            Color::WHITE,
+            None,
+            &background,
+        );
+        if radio || !checked {
+            let border = if checked {
+                accent_color
+            } else if disabled {
+                Color::from_rgb8(170, 170, 170)
+            } else {
+                Color::from_rgb8(118, 118, 118)
+            };
+            scene.stroke(
+                &Stroke::new(self.scale),
+                self.transform,
+                border,
+                None,
+                &frame.inset(-self.scale / 2.0).to_rounded_rect(radius),
+            );
+        }
+        if checked && radio {
+            scene.fill(
+                Fill::NonZero,
+                self.transform,
+                accent_color,
+                None,
+                &Circle::new(center, side * 0.3),
+            );
+        } else if checked {
+            scene.fill(
+                Fill::NonZero,
+                self.transform,
+                accent_color,
+                None,
+                &frame.to_rounded_rect(radius),
+            );
+            let mut tick = BezPath::new();
+            tick.move_to((frame.x0 + side * 0.2, center.y));
+            tick.line_to((frame.x0 + side * 0.4, frame.y0 + side * 0.7));
+            tick.line_to((frame.x0 + side * 0.8, frame.y0 + side * 0.2));
+            scene.stroke(
+                &Stroke::new(side * 0.16),
+                self.transform,
+                Color::WHITE,
+                None,
+                &tick,
+            );
         }
     }
 }
@@ -276,63 +369,5 @@ impl super::BlitzDomPainter<'_, '_> {
                 }
             }
         }
-    }
-}
-
-fn draw_checkbox(
-    scene: &mut impl PaintScene,
-    checked: bool,
-    frame: RoundedRect,
-    transform: Affine,
-    accent_color: Color,
-    scale: f64,
-) {
-    if checked {
-        scene.fill(Fill::NonZero, transform, accent_color, None, &frame);
-        //Tick code derived from masonry
-        let mut path = BezPath::new();
-        path.move_to((2.0, 9.0));
-        path.line_to((6.0, 13.0));
-        path.line_to((14.0, 2.0));
-
-        path.apply_affine(Affine::translate(Vec2 { x: 2.0, y: 1.0 }).then_scale(scale));
-        path.apply_affine(Affine::translate((frame.rect().x0, frame.rect().y0)));
-
-        let style = Stroke {
-            width: 2.0 * scale,
-            join: Join::Round,
-            miter_limit: 10.0,
-            start_cap: Cap::Round,
-            end_cap: Cap::Round,
-            dash_pattern: Default::default(),
-            dash_offset: 0.0,
-        };
-
-        scene.stroke(&style, transform, Color::WHITE, None, &path);
-    } else {
-        scene.fill(Fill::NonZero, transform, Color::WHITE, None, &frame);
-        scene.stroke(&Stroke::default(), transform, color::palette::css::GRAY, None, &frame);
-    }
-}
-
-fn draw_radio_button(
-    scene: &mut impl PaintScene,
-    checked: bool,
-    center: Point,
-    transform: Affine,
-    accent_color: Color,
-    scale: f64,
-) {
-    let outer_ring = Circle::new(center, 8.0 * scale);
-    let gap = Circle::new(center, 6.0 * scale);
-    let inner_circle = Circle::new(center, 4.0 * scale);
-    if checked {
-        scene.fill(Fill::NonZero, transform, accent_color, None, &outer_ring);
-        scene.fill(Fill::NonZero, transform, Color::WHITE, None, &gap);
-        scene.fill(Fill::NonZero, transform, accent_color, None, &inner_circle);
-    } else {
-        const GRAY: Color = color::palette::css::GRAY;
-        scene.fill(Fill::NonZero, transform, GRAY, None, &outer_ring);
-        scene.fill(Fill::NonZero, transform, Color::WHITE, None, &gap);
     }
 }

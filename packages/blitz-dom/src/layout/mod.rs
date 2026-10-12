@@ -16,7 +16,8 @@ use style::values::computed::length_percentage::CalcLengthPercentage;
 use stylo_taffy::TaffyStyloStyle;
 use taffy::{
     AxisStaticEdge, AxisStaticPosition, BlockContext, CoreStyle as _, DetailedLayoutInfo,
-    FlexDirection, LayoutContainingBlock, LayoutPartialTree, MaybeMath as _, NodeId, OofCandidate,
+    FlexDirection, LayoutContainingBlock, LayoutPartialTree, MaybeMath as _, MaybeResolve as _,
+    NodeId, OofCandidate,
     ResolveOrZero, RoundTree, RunMode, TraversePartialTree, TraverseTree, compute_block_layout,
     compute_cached_layout, compute_flexbox_layout, compute_grid_layout, compute_leaf_layout,
     compute_oof_layout, prelude::*,
@@ -274,6 +275,37 @@ impl LayoutPassState<'_> {
             })
         };
 
+        let mut inputs = inputs;
+        if matches!(
+            node.element_data().map(|element| element.name.local.as_ref()),
+            Some("input" | "textarea" | "select")
+        )
+            && inputs.available_space.width == AvailableSpace::MinContent
+            && inputs.known_dimensions.width.is_none()
+        {
+            let style = node.layout_style();
+            let width = style.size().width;
+            // Cyclic percentages on replaced form controls contribute against
+            // zero. Flex's ContentSize mode otherwise discards the percentage
+            // before reaching the leaf, incorrectly retaining cols/size widths.
+            if width.maybe_resolve(None, resolve_calc_value).is_none() {
+                let padding_border = style
+                    .padding()
+                    .resolve_or_zero(inputs.parent_size.width, resolve_calc_value)
+                    + style
+                        .border()
+                        .resolve_or_zero(inputs.parent_size.width, resolve_calc_value);
+                let adjustment = if style.box_sizing() == taffy::BoxSizing::ContentBox {
+                    padding_border.horizontal_axis_sum()
+                } else {
+                    0.0
+                };
+                inputs.known_dimensions.width = width
+                    .maybe_resolve(Some(0.0), resolve_calc_value)
+                    .map(|width| width + adjustment);
+            }
+        }
+
         match &mut node.data {
             NodeData::Text(data) => {
                 // With the new "inline context" architecture all text nodes should be wrapped in an "inline layout context"
@@ -443,8 +475,9 @@ impl LayoutPassState<'_> {
                                         AvailableSpace::Definite(limit) => {
                                             limit.min(measure_columns(columns))
                                         }
-                                        AvailableSpace::MinContent => 0.0,
-                                        AvailableSpace::MaxContent => measure_columns(columns),
+                                        AvailableSpace::MinContent | AvailableSpace::MaxContent => {
+                                            measure_columns(columns)
+                                        }
                                     },
                                     height: measure_line().0,
                                 },
