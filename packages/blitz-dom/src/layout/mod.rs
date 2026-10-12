@@ -409,21 +409,12 @@ impl LayoutPassState<'_> {
                                 inputs,
                                 &node.layout_style(),
                                 resolve_calc_value,
-                                |_known_size, _available_space| {
-                                    let size = node.layout_style().size();
-                                    let width = size.width.resolve_or_zero(
-                                        inputs.parent_size.width,
-                                        resolve_calc_value,
-                                    );
-                                    let height = size.height.resolve_or_zero(
-                                        inputs.parent_size.height,
-                                        resolve_calc_value,
-                                    );
-                                    let min_size = width.min(height);
-                                    taffy::Size {
-                                        width: min_size,
-                                        height: min_size,
-                                    }
+                                // CSS auto dimensions use the native control's
+                                // intrinsic size; authored dimensions are resolved
+                                // independently by the leaf layout owner.
+                                |_known_size, _available_space| taffy::Size {
+                                    width: 13.0,
+                                    height: 13.0,
                                 },
                             );
                             output.baselines = taffy::Baselines {
