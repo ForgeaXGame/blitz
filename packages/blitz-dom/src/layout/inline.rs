@@ -336,6 +336,9 @@ impl LayoutPassState<'_> {
 
         // Compute size of inline boxes
         let child_inputs = taffy::tree::LayoutInput {
+            // Atomic inline baselines affect the line's intrinsic height. Flex/grid
+            // only export them in PerformLayout, even when this line is being measured.
+            run_mode: RunMode::PerformLayout,
             known_dimensions: Size::NONE,
             available_space,
             sizing_mode: SizingMode::InherentSize,
