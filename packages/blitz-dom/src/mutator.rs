@@ -374,6 +374,10 @@ impl DocumentMutator<'_> {
         }
 
         if *attr == local_name!("value") {
+            if element.is_button_input() {
+                self.process_button_input(node_id);
+                return;
+            }
             if let Some(input_data) = element.text_input_data_mut() {
                 if input_data.dirty_value {
                     return;
@@ -516,6 +520,10 @@ impl DocumentMutator<'_> {
 
         // Update text input value
         if name.local == local_name!("value") {
+            if element.is_button_input() {
+                self.process_button_input(node_id);
+                return;
+            }
             if let Some(input_data) = element.text_input_data_mut() {
                 if input_data.dirty_value {
                     return;
@@ -1384,22 +1392,34 @@ impl<'doc> DocumentMutator<'doc> {
             return;
         };
 
-        let tagname = data.name.local.as_ref();
         let type_attr = data.attr(local_name!("type"));
-        let value = data.attr(local_name!("value"));
-
-        // Add content of "value" attribute as a text node child if:
-        //   - Tag name is
-        if let ("input", Some("button" | "submit" | "reset"), Some(value)) =
-            (tagname, type_attr, value)
-        {
-            let value = value.to_string();
-            let id = self.create_text_node(&value);
-            self.append_children(target_id, &[id]);
+        // Button-input values are attributes, not editable drafts. Keep their
+        // existing generated label synchronized without accumulating children.
+        if data.is_button_input() {
+            let value = data
+                .attr(local_name!("value"))
+                .unwrap_or_else(|| {
+                    if type_attr.is_some_and(|kind| kind.eq_ignore_ascii_case("submit")) {
+                        "Submit"
+                    } else if type_attr.is_some_and(|kind| kind.eq_ignore_ascii_case("reset")) {
+                        "Reset"
+                    } else {
+                        ""
+                    }
+                })
+                .to_string();
+            if let [child] = node.children.as_slice()
+                && self.doc.nodes[*child].text_data().is_some()
+            {
+                self.set_node_text(*child, &value);
+            } else {
+                let id = self.create_text_node(&value);
+                self.replace_children(target_id, &[id]);
+            }
             return;
         }
         #[cfg(feature = "file-input")]
-        if let ("input", Some("file")) = (tagname, type_attr) {
+        if let ("input", Some("file")) = (data.name.local.as_ref(), type_attr) {
             let button_id = self.create_element(
                 qual_name!("button", html),
                 vec![

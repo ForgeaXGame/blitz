@@ -2745,6 +2745,10 @@ impl BaseDocument {
 
     /// Read a control value without requiring the element to have a layout box.
     pub fn input_value(&self, node_id: NodeId) -> Option<String> {
+        let element = self.get_node(node_id)?.element_data()?;
+        if element.is_button_input() {
+            return Some(element.attr(local_name!("value")).unwrap_or("").to_string());
+        }
         if let Some(value) = self
             .select_value(node_id)
             .or_else(|| self.option_value(node_id))
@@ -2838,7 +2842,12 @@ impl BaseDocument {
             self.shell_provider.request_redraw();
             return true;
         }
-        if self.input_checked(node_id).is_some() {
+        if self.input_checked(node_id).is_some()
+            || self
+                .get_node(node_id)
+                .and_then(|node| node.element_data())
+                .is_some_and(|element| element.is_button_input())
+        {
             self.mutate()
                 .set_attribute(node_id, crate::qual_name!("value"), value);
             return true;
