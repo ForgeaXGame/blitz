@@ -1,9 +1,9 @@
 use super::ElementCx;
-use crate::color::Color;
+use crate::color::{Color, ToColorColor as _};
 use anyrender::PaintScene;
 use blitz_dom::local_name;
 use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, RoundedRect, Stroke, Vec2};
-use peniko::Fill;
+use peniko::{Fill, Mix};
 use style::dom::TElement as _;
 
 impl ElementCx<'_, '_> {
@@ -13,7 +13,7 @@ impl ElementCx<'_, '_> {
             let index = self.context.dom.select_index(self.node.id).unwrap_or(-1);
             if let Some((_, layout)) = select.choices.get(index as usize) {
                 let position = Affine::translate((
-                    frame.x0,
+                    frame.x0 + 4.0 * self.scale,
                     frame.y0 + (frame.height() - f64::from(layout.height())) / 2.0,
                 ));
                 crate::text::stroke_text(
@@ -32,9 +32,9 @@ impl ElementCx<'_, '_> {
             arrow.line_to((center.x, center.y + 1.5 * self.scale));
             arrow.line_to((center.x + 3.0 * self.scale, center.y - 1.5 * self.scale));
             scene.stroke(
-                &Stroke::new(self.scale),
+                &Stroke::new(2.0 * self.scale),
                 self.transform,
-                Color::BLACK,
+                self.style.clone_color().as_srgb_color(),
                 None,
                 &arrow,
             );
@@ -239,6 +239,18 @@ impl super::BlitzDomPainter<'_, '_> {
                         ),
                     );
                 }
+                let disabled = self.dom.option_disabled(*option);
+                if disabled {
+                    scene.push_layer(
+                        Fill::NonZero,
+                        Mix::Normal,
+                        0.5,
+                        transform,
+                        &bounds,
+                        None,
+                        None,
+                    );
+                }
                 crate::text::stroke_text(
                     scene,
                     layout.lines(),
@@ -253,6 +265,9 @@ impl super::BlitzDomPainter<'_, '_> {
                     id,
                     &mut self.draw_text_context.borrow_mut(),
                 );
+                if disabled {
+                    scene.pop_layer();
+                }
             }
         }
     }

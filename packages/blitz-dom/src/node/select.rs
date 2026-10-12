@@ -297,7 +297,9 @@ impl BaseDocument {
         // An empty select still has the same native control height.
         let line_height = {
             let mut fonts = self.font_ctx.lock().unwrap();
-            let builder = self.layout_ctx.tree_builder(&mut fonts, scale, true, &text_style);
+            let builder = self
+                .layout_ctx
+                .tree_builder(&mut fonts, scale, true, &text_style);
             let mut strut = builder.build().0;
             strut.break_all_lines(None);
             f64::from(strut.height() / scale)
@@ -447,7 +449,9 @@ impl BaseDocument {
                     .highlighted;
                 if let Some(index) = options
                     .iter()
-                    .position(|option| Some(*option) == highlighted && !self.option_disabled(*option))
+                    .position(|option| {
+                        Some(*option) == highlighted && !self.option_disabled(*option)
+                    })
                 {
                     self.set_select_index(id, index as i32);
                 }
