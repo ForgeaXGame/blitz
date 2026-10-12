@@ -23,7 +23,7 @@ use blitz_dom::node::{
     ListItemLayout, ListItemLayoutPosition, Marker, NodeData, RasterImageData, TextInputData,
     TextNodeData,
 };
-use blitz_dom::{BaseDocument, ElementData, Node, NodeId, local_name};
+use blitz_dom::{BaseDocument, ElementData, Node, NodeId, hoisted_child_position, local_name};
 use blitz_traits::devtools::DevtoolSettings;
 
 use style::values::computed::{BorderCornerRadius, ColorOrAuto};
@@ -380,7 +380,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         };
 
         // Don't render things that are out of view
-        let overflow = *node.scrollable_overflow();
+        let overflow = node.paint_bounds(self.scale);
         let transform = parent_style_transform
             * Affine::translate(box_position)
             * node.transform().as_deref().copied().unwrap_or_default();
@@ -1067,16 +1067,15 @@ impl ElementCx<'_, '_> {
         // Regular children
         if let Some(children) = &*self.node.paint_children.borrow() {
             for child_id in children {
-                // Fixed-position children of the root element are positioned against
-                // the viewport and do not scroll with it, so cancel out the viewport
-                // scroll (applied in `paint_scene`). A fixed box contained by a
-                // transformed ancestor scrolls with it like any out-of-flow box.
                 let child = &self.context.dom.as_ref().tree()[*child_id];
-                let child_transform = if child.is_viewport_fixed() {
-                    let scroll = self.context.dom.as_ref().viewport_scroll();
+                let child_transform = if child.taffy_position().is_out_of_flow() {
+                    // Stacking ownership can differ from the layout containing
+                    // block. Paint and hit testing share that coordinate bridge.
+                    let position =
+                        hoisted_child_position(self.node.tree(), self.node.id, *child_id);
                     parent_style_transform.pre_translate(kurbo::Vec2 {
-                        x: scroll.x * self.scale,
-                        y: scroll.y * self.scale,
+                        x: position.x as f64 * self.scale,
+                        y: position.y as f64 * self.scale,
                     })
                 } else {
                     parent_style_transform
