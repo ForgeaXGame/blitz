@@ -44,6 +44,7 @@ mod config;
 mod cssom;
 mod debug;
 mod events;
+mod focus_navigation;
 mod font_metrics;
 mod form;
 mod html;
