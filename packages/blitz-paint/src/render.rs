@@ -443,7 +443,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
         // scrolled out of view is culled rather than drawn and clipped away. The box used
         // here matches the clip applied to the content below.
         let child_clip_rect = if should_clip {
-            let clip_box = if is_text_input {
+            let clip_box = if is_text_input || is_image {
                 cx.frame.content_box_path()
             } else {
                 cx.frame.padding_box_path()
@@ -536,7 +536,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                         cx.stroke_devtools(scene);
 
                         // TODO: allow layers with opacity to be unclipped (overflow: visible)
-                        let clip = if is_text_input {
+                        let clip = if is_text_input || is_image {
                             &cx.frame.content_box_path()
                         } else {
                             &cx.frame.padding_box_path()
@@ -1158,8 +1158,6 @@ impl ElementCx<'_, '_> {
 
     fn draw_image(&self, scene: &mut impl PaintScene) {
         if let Some(image) = self.element.raster_image_data() {
-            let width = self.frame.content_box.width() as u32;
-            let height = self.frame.content_box.height() as u32;
             let x = self.frame.content_box.origin().x;
             let y = self.frame.content_box.origin().y;
 
@@ -1168,10 +1166,12 @@ impl ElementCx<'_, '_> {
             let image_rendering = self.style.clone_image_rendering();
             let quality = to_image_quality(image_rendering);
 
-            // Apply object-fit algorithm
+            // Fit intrinsic image dimensions in CSS pixels. Only the final
+            // paint transform converts to device pixels, including none and
+            // scale-down, whose result can retain the intrinsic dimensions.
             let container_size = taffy::Size {
-                width: width as f32,
-                height: height as f32,
+                width: (self.frame.content_box.width() / self.scale) as f32,
+                height: (self.frame.content_box.height() / self.scale) as f32,
             };
             let object_size = taffy::Size {
                 width: image.width as f32,
@@ -1181,16 +1181,16 @@ impl ElementCx<'_, '_> {
 
             // Compute object-position
             let x_offset = object_position.horizontal.resolve(
-                CSSPixelLength::new(container_size.width - paint_size.width) / self.scale as f32,
+                CSSPixelLength::new(container_size.width - paint_size.width),
             ) * self.scale as f32;
             let y_offset = object_position.vertical.resolve(
-                CSSPixelLength::new(container_size.height - paint_size.height) / self.scale as f32,
+                CSSPixelLength::new(container_size.height - paint_size.height),
             ) * self.scale as f32;
             let x = x + x_offset.px() as f64;
             let y = y + y_offset.px() as f64;
 
-            let x_scale = paint_size.width as f64 / object_size.width as f64;
-            let y_scale = paint_size.height as f64 / object_size.height as f64;
+            let x_scale = paint_size.width as f64 * self.scale / object_size.width as f64;
+            let y_scale = paint_size.height as f64 * self.scale / object_size.height as f64;
             let transform = self
                 .transform
                 .pre_translate(Vec2 { x, y })

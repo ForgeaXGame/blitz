@@ -1381,6 +1381,7 @@ impl Node {
     ) -> Option<HitResult> {
         use style::computed_values::pointer_events::T as PointerEvents;
         use style::computed_values::visibility::T as Visibility;
+        use style::values::computed::Overflow;
 
         // Don't hit on visbility:hidden elements
         if let Some(style) = self.primary_styles() {
@@ -1398,8 +1399,8 @@ impl Node {
             .primary_styles()
             .is_some_and(|style| style.clone_pointer_events() == PointerEvents::None);
 
-        let mut x = x - self.final_layout().location.x + self.scroll_offset().x as f32;
-        let mut y = y - self.final_layout().location.y + self.scroll_offset().y as f32;
+        let mut x = x - self.final_layout().location.x;
+        let mut y = y - self.final_layout().location.y;
 
         if let Some(t) = self.transform().as_deref() {
             let p = t.inverse() * kurbo::Point::new(x as f64 * scale, y as f64 * scale);
@@ -1408,10 +1409,31 @@ impl Node {
         }
 
         let size = self.final_layout().size;
-        let matches_self = !(x < 0.0
-            || x > size.width + self.scroll_offset().x as f32
-            || y < 0.0
-            || y > size.height + self.scroll_offset().y as f32);
+        let matches_self = !(x < 0.0 || x > size.width || y < 0.0 || y > size.height);
+
+        // The scrollport stays in the transformed border box; content scrolls
+        // inside it. Reject clipped descendants before adding the local scroll
+        // offset, so content above a scroller cannot steal a sibling's hit.
+        // Root overflow belongs to the viewport, not to the root's own box.
+        let clipped = self.containing_block().is_some()
+            && self.primary_styles().is_some_and(|style| {
+                let border = self.final_layout().border;
+                (!matches!(style.get_box().overflow_x, Overflow::Visible)
+                    && (x < border.left || x > size.width - border.right))
+                    || (!matches!(style.get_box().overflow_y, Overflow::Visible)
+                        && (y < border.top || y > size.height - border.bottom))
+            });
+        if clipped {
+            return (matches_self && !pointer_events_none).then_some(HitResult {
+                node_id: self.id,
+                x,
+                y,
+                is_text: false,
+            });
+        }
+
+        x += self.scroll_offset().x as f32;
+        y += self.scroll_offset().y as f32;
 
         let overflow_rect = self.final_layout().scrollable_overflow_rect;
         let matches_content = !(x < 0.0
