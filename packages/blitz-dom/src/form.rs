@@ -3,6 +3,8 @@ use markup5ever::{LocalName, local_name};
 
 use crate::{
     BaseDocument, ElementData,
+    layout::damage::ALL_DAMAGE,
+    node::SpecialElementData,
     traversal::{AncestorTraverser, TreeTraverser},
 };
 use blitz_traits::{
@@ -60,6 +62,93 @@ impl BaseDocument {
                 .data
                 .is_element_with_tag_name(&local_name!("form"))
         })
+    }
+
+    /// Apply an accepted form reset to current native control state. The host
+    /// dispatches the cancelable reset event before entering this operation.
+    pub fn reset_form(&mut self, form_id: NodeId) -> bool {
+        let Some(form) = self
+            .get_node(form_id)
+            .filter(|node| node.data.is_element_with_tag_name(&local_name!("form")))
+        else {
+            return false;
+        };
+        // Resolve ownership after the event: callbacks may have changed defaults,
+        // moved controls, or inserted new controls into this same tree.
+        let controls: Vec<_> = TreeTraverser::new_with_root(self, form.tree_root_id())
+            .filter(|id| {
+                self.nodes[*id].element_data().is_some_and(|element| {
+                    matches!(element.name.local.as_ref(), "input" | "textarea" | "select")
+                }) && self.form_owner(*id) == Some(form_id)
+            })
+            .collect();
+        for id in controls {
+            if let Some(options) = self.select_options(id) {
+                for option in options {
+                    self.snapshot_node(option);
+                    let node = &mut self.nodes[option];
+                    let element = node.element_data_mut().unwrap();
+                    element.special_data = SpecialElementData::Option { dirty: false };
+                    element.sync_option_attribute();
+                    node.insert_damage(ALL_DAMAGE);
+                    node.mark_ancestors_dirty();
+                }
+                let data = self.nodes[id]
+                    .element_data_mut()
+                    .unwrap()
+                    .select_data_mut()
+                    .unwrap();
+                data.allow_empty = false;
+                data.open = false;
+                data.highlighted = None;
+                self.reconcile_select(id);
+            } else if self.input_checked(id).is_some() {
+                self.snapshot_node(id);
+                let element = self.nodes[id].element_data_mut().unwrap();
+                element.special_data = SpecialElementData::CheckboxInput { dirty: false };
+                element.sync_checked_attribute();
+                self.reconcile_radio_group(id);
+            } else if self.nodes[id]
+                .element_data()
+                .unwrap()
+                .range_constraints()
+                .is_some()
+            {
+                let default = self.nodes[id]
+                    .attr(local_name!("value"))
+                    .unwrap_or("")
+                    .to_string();
+                let element = self.nodes[id].element_data_mut().unwrap();
+                element.set_range_value(&default);
+                if let SpecialElementData::RangeInput(input) = &mut element.special_data {
+                    input.dirty = false;
+                }
+            } else if self.input_text(id).is_some() {
+                let default = if self.nodes[id]
+                    .data
+                    .is_element_with_tag_name(&local_name!("textarea"))
+                {
+                    self.nodes[id].text_content()
+                } else {
+                    self.nodes[id]
+                        .attr(local_name!("value"))
+                        .unwrap_or("")
+                        .to_string()
+                };
+                self.set_input_value(id, &default);
+                self.nodes[id]
+                    .element_data_mut()
+                    .unwrap()
+                    .text_input_data_mut()
+                    .unwrap()
+                    .dirty_value = false;
+            }
+            self.nodes[id].insert_damage(ALL_DAMAGE);
+            self.nodes[id].mark_ancestors_dirty();
+        }
+        self.dismiss_validation_message();
+        self.shell_provider.request_redraw();
+        true
     }
 
     /// Submits a form with the given form node ID and submitter node ID
