@@ -259,6 +259,19 @@ impl DocumentMutator<'_> {
     }
 
     pub fn set_attribute(&mut self, node_id: NodeId, name: QualName, value: &str) {
+        // HTML's value mode changes to default/on for checkbox and radio. Carry
+        // a nonempty current value into the existing value attribute first.
+        let checkable_value = if name.local == local_name!("type")
+            && (value.eq_ignore_ascii_case("checkbox") || value.eq_ignore_ascii_case("radio"))
+            && self.doc.nodes[node_id]
+                .element_data()
+                .is_some_and(|element| element.name.local == local_name!("input"))
+            && self.doc.input_checked(node_id).is_none()
+        {
+            self.doc.input_value(node_id).filter(|value| !value.is_empty())
+        } else {
+            None
+        };
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         if node_is_in_document {
             self.doc.snapshot_node(node_id);
@@ -317,6 +330,9 @@ impl DocumentMutator<'_> {
         }
 
         element.attrs.set(name.clone(), value);
+        if let Some(value) = checkable_value {
+            element.attrs.set(crate::qual_name!("value"), &value);
+        }
         if name.local == local_name!("selected") {
             element.sync_option_attribute();
         }

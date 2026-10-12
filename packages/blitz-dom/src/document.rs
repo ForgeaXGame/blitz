@@ -2755,7 +2755,7 @@ impl BaseDocument {
 
     /// Initialize value state independently of style/layout and DOM attachment.
     pub(crate) fn ensure_text_input(&mut self, node_id: NodeId) -> bool {
-        let Some(initial) = self.input_value(node_id) else {
+        let Some(initial) = self.input_text(node_id) else {
             return false;
         };
         let element = self.nodes[node_id].element_data_mut().unwrap();
