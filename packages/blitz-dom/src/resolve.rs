@@ -8,6 +8,7 @@ use kurbo::{Affine, Rect};
 use parley::LayoutContext;
 use selectors::Element as _;
 use style::dom::TDocument;
+use style::values::specified::box_::DisplayInside;
 
 #[cfg(feature = "parallel-construct")]
 use rayon::prelude::*;
@@ -171,7 +172,15 @@ impl BaseDocument {
     }
 
     fn resolve_transforms(&mut self, node_id: NodeId) -> Rect {
-        if !self.nodes.contains_key(node_id) {
+        let Some(node) = self.nodes.get(node_id) else {
+            return Rect::ZERO;
+        };
+        // Hidden subtrees retain hoisted/layout lists for restoration, but
+        // their descendants may no longer have computed styles or live boxes.
+        if node
+            .display_style()
+            .is_none_or(|display| display.inside() == DisplayInside::None)
+        {
             return Rect::ZERO;
         }
 
@@ -268,6 +277,12 @@ impl BaseDocument {
     /// propagates. CSS transforms may extend that range, never shrink it.
     fn scroll_overflow_contribution(&self, node_id: NodeId, scale: f64) -> Rect {
         let node = &self.nodes[node_id];
+        if node
+            .display_style()
+            .is_none_or(|display| display.inside() == DisplayInside::None)
+        {
+            return Rect::ZERO;
+        }
         let layout = node.final_layout();
         let style = node.layout_style();
         let overflow = style.overflow();
