@@ -365,10 +365,19 @@ impl BaseDocument {
                     return false;
                 };
 
-                if !node.has_boxes() { return false; }
+                if !node.has_boxes() {
+                    return false;
+                }
                 let initial = node.scroll_position();
-                if let Some(input) = node.element_data_mut().and_then(|element| element.text_input_data_mut()) {
-                    input.scroll_offset = if input.is_multiline { offset.y } else { offset.x } as f32;
+                if let Some(input) = node
+                    .element_data_mut()
+                    .and_then(|element| element.text_input_data_mut())
+                {
+                    input.scroll_offset = if input.is_multiline {
+                        offset.y
+                    } else {
+                        offset.x
+                    } as f32;
                 } else {
                     *node.scroll_offset_mut() = offset;
                 }
@@ -376,7 +385,12 @@ impl BaseDocument {
                     return false;
                 }
 
-                let metrics = (node.scroll_width(), node.scroll_height(), node.client_width(), node.client_height());
+                let metrics = (
+                    node.scroll_width(),
+                    node.scroll_height(),
+                    node.client_width(),
+                    node.client_height(),
+                );
                 self.nodes.bump_geometry_generation();
                 let event = BlitzScrollEvent {
                     scroll_top: offset.y,
@@ -545,9 +559,13 @@ impl BaseDocument {
                     return (Point::ZERO, Point::ZERO);
                 };
 
-                if let Some(input) = node.element_data().and_then(|element| element.text_input_data()) {
+                if let Some(input) = node
+                    .element_data()
+                    .and_then(|element| element.text_input_data())
+                {
                     let viewport = node.text_input_viewport_size();
-                    let maximum = f64::from(input.max_scroll_offset(viewport.width, viewport.height));
+                    let maximum =
+                        f64::from(input.max_scroll_offset(viewport.width, viewport.height));
                     let max = if input.is_multiline {
                         Point { x: 0.0, y: maximum }
                     } else {
